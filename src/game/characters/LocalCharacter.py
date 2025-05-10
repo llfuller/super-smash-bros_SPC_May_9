@@ -199,9 +199,9 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             inner_radius
         )
 
-    def jump(self):
+    def jump(self, is_short_hop=False):
         # Debug info to see if this function is getting called
-        print(f"{self.name} attempting to jump. Currently in_air: {self.in_air}, animation_locked: {self.animation_locked}")
+        print(f"{self.name} attempting to jump. Currently in_air: {self.in_air}, animation_locked: {self.animation_locked}, short_hop: {is_short_hop}")
         
         # Make sure we can actually jump
         if self.animation_locked:
@@ -212,17 +212,22 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             print(f"{self.name} can't jump because already in air")
             return False
         
-        # Apply a single upward impulse (don't change horizontal velocity)
-        self.vel.y = -16  # Reduced from -20 for lower jumps
+        # Apply different upward impulse based on jump type
+        if is_short_hop:
+            self.vel.y = -10  # Reduced velocity for short hop
+            print(f"{self.name} short hopped with velocity {self.vel.y}")
+        else:
+            self.vel.y = -16  # Full jump velocity
+            print(f"{self.name} full jumped with velocity {self.vel.y}")
+            
         self.in_air = True
         self.is_jumping = True
         
         # Clear any platform we were on
         self.last_ground_y = None
         
-        print(f"{self.name} jumped with velocity {self.vel.y}")
         return True
-
+        
     def take_damage(self, damage, attacker_pos_x):
         """
         Apply damage (increases percentage) and calculate knockback based on percentage

@@ -34,6 +34,7 @@ from platform_layouts import get_layout  # Import the platform layouts
 from config import PRO_CONTROLLER, DEFAULT_SETTINGS  # Import Pro Controller config
 from input_handler import input_handler, INTENTS  # Import unified input handler
 from player_controller import PlayerController  # Import the player controller
+from entities.entities import EntitySystem  # Import our entity system
 
 # Add missing color
 YELLOW = (255, 255, 0)
@@ -77,6 +78,19 @@ class LocalGame:
         self.initialized = False  # initialized game in arena (with players)
         self.restart_request = False  # checks if player requested for a restart
         self.current_frame = 0  # Track frames for debugging and timing
+        
+        # Initialize entity system
+        from entities.entities import DSL
+        import sys
+        sys.modules['entities.entities'].DSL = EntitySystem(self)
+        self.entity_system = sys.modules['entities.entities'].DSL
+        
+        # Load bob-omb entity definitions
+        try:
+            entities, timers = self.entity_system.load_from_json("entities/bobomb_entity.json")
+            print(f"Loaded {entities} entities and {timers} timers from bobomb_entity.json")
+        except Exception as e:
+            print(f"Error loading bob-omb entity definitions: {e}")
         
         # Emergency recovery counter for movement issues
         self.emergency_fix_applied = False
@@ -381,6 +395,11 @@ class LocalGame:
             
             # Process each event directly (for quit events and debug toggle)
             for event in events:
+                # Handle P key to spawn bob-omb
+                if event.type == pg.KEYDOWN and event.key == pg.K_p and self.initialized and self.playing:
+                    # Only allow spawning bob-ombs during play
+                    self.spawn_bobomb()
+                
                 # Controller debug output for button presses
                 if self.controller_debug:
                     if event.type == pg.JOYBUTTONDOWN:
@@ -431,9 +450,9 @@ class LocalGame:
                             quit()
 
             # Handle movement for all players using their respective controllers
-            # Pass None instead of keys to enforce using only the intent system
-            for controller in self.controllers.values():
-                controller.handle_movement(None, self)
+            # This has been moved to the update method for better timing of intents
+            # for controller in self.controllers.values():
+            #     controller.handle_movement(None, self)
                 
         except Exception as e:
             print(f"Error: {e}")
@@ -446,12 +465,20 @@ class LocalGame:
             # Increment frame counter
             self.current_frame += 1
             
+            # Update entity system timers
+            self.entity_system.update_timers(1/60)  # assuming 60 FPS
+            
+            # IMPORTANT: Process player controller input BEFORE sprite updates
+            # This ensures that jump intents and other inputs are processed first
+            for controller in self.controllers.values():
+                controller.handle_movement(None, self)
+            
             # Update all non-player sprites
             for sprite in self.all_sprites:
                 if not any(sprite == player_data.get('sprite') for player_data in self.players.values() if 'sprite' in player_data):
                     sprite.update()
                     
-            # First update sprite physics and state for all player sprites
+            # Then update sprite physics and state for all player sprites
             for name, player_data in self.players.items():
                 if 'sprite' in player_data:
                     sprite = player_data['sprite']
@@ -1237,6 +1264,47 @@ class LocalGame:
                         center_x, center_y = sprite.rect.center
                         pg.draw.circle(self.screen, shield_color, (center_x, center_y), 5)  # Use actual shield color
                         pg.draw.circle(self.screen, (255, 255, 255), (center_x, center_y), 5, 1)  # White outline
+
+    # Add the bob-omb spawning method
+    def spawn_bobomb(self):
+        """Spawn a bob-omb in a random location above the arena"""
+        import random
+        
+        try:
+            # Get a random x position within the game arena
+            x = random.randint(100, GAME_WIDTH - 100)
+            
+            # Spawn it near the top
+            y = 100
+            
+            # Create properties for the bob-omb
+            properties = {
+                "fuse_time": random.randint(120, 240),  # 2-4 seconds
+                "damage": random.randint(15, 30),       # Random damage
+                "explosion_radius": random.randint(80, 120)  # Random radius
+            }
+            
+            # Spawn the bob-omb through our entity system
+            print(f"Spawning bob-omb at ({x}, {y})")
+            bomb = self.entity_system.spawn_entity("bobomb", x, y, properties)
+            
+            # Add a message to the chat
+            if len(self.chat_messages) > 15:
+                self.chat_messages.pop(0)  # Remove oldest message if too many
+            self.chat_messages.append("Bob-omb has been spawned! Take cover!")
+            
+            return bomb
+        except Exception as e:
+            print(f"Error spawning bob-omb: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Add error message to chat
+            if len(self.chat_messages) > 15:
+                self.chat_messages.pop(0)
+            self.chat_messages.append("Failed to spawn Bob-omb. Check console for details.")
+            
+            return None
 
 # main start of the program
 game = LocalGame()

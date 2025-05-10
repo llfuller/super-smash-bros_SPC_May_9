@@ -111,14 +111,21 @@ class MeleePhysicsMixin:
                 if self.move == DAMAGED:
                     self.move = STAND
     
-    def jump_with_melee_physics(self):
+    def jump_with_melee_physics(self, is_short_hop=False):
         """Execute a jump with Melee physics"""
         # Only allow jump if not animation locked and not in air
         if self.animation_locked or self.in_air:
             return False
             
-        # Regular jump with Melee velocity
-        self.vel.y = -self.air_physics['fall_speed'] * 1.5
+        if is_short_hop:
+            # Short hop with lower Melee velocity
+            self.vel.y = -self.air_physics['fall_speed'] * 0.8  # Lower multiplier for short hop
+            print(f"{self.name} Melee short hop with velocity {self.vel.y}")
+        else:
+            # Regular jump with Melee velocity
+            self.vel.y = -self.air_physics['fall_speed'] * 1.5
+            print(f"{self.name} Melee full jump with velocity {self.vel.y}")
+            
         self.in_air = True
         return True
     

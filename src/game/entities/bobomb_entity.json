@@ -1,0 +1,66 @@
+{
+  "entities": [
+    {
+      "id": "bobomb_template",
+      "prefab": "bobomb",
+      "components": {
+        "xPos": 300,
+        "yPos": 100,
+        "fuse_time": 180,
+        "damage": 25,
+        "explosion_radius": 100
+      },
+      "behaviors": [
+        {
+          "event": "OnCollision",
+          "actions": [
+            {
+              "type": "ApplyForce",
+              "vector": {
+                "x": "5",
+                "y": "-3"
+              }
+            }
+          ]
+        },
+        {
+          "event": "OnDestroyed",
+          "actions": [
+            {
+              "type": "PlaySound",
+              "cue": "explosion"
+            },
+            {
+              "type": "Commentary",
+              "text": "Bob-omb exploded!"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "timers": [
+    {
+      "id": "bobomb_spawner",
+      "duration": 10.0,
+      "repeat": 3,
+      "on_complete": [
+        {
+          "type": "Spawn",
+          "prefab": "bobomb",
+          "x": 300,
+          "y": 100,
+          "properties": {
+            "fuse_time": 240,
+            "damage": 30,
+            "explosion_radius": 120
+          }
+        },
+        {
+          "type": "Commentary",
+          "text": "Another Bob-omb has appeared!"
+        }
+      ]
+    }
+  ]
+} 

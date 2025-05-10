@@ -18,6 +18,7 @@ class PlayerController:
         self.player_name = player_name
         self.player_data = player_data
         self.sprite = sprite
+        self.jump_initiated_frame = 0  # Track when jump was initiated
         
     def set_sprite(self, sprite):
         """Update the sprite reference"""
@@ -142,6 +143,58 @@ class PlayerController:
                     sprite.move = STAND
                     player_data['move'] = STAND
         
+        # Handle jump intent states - core tracking variables
+        self.jump_requested = getattr(self, 'jump_requested', False)  # If jump was requested but not executed yet
+        self.jump_executed = getattr(self, 'jump_executed', False)  # If jump was already executed
+        self.jump_request_frame = getattr(self, 'jump_request_frame', 0)  # Frame when jump was requested
+        
+        # Safety check - if jump was requested too long ago without execution, reset the state
+        if self.jump_requested and game.current_frame - self.jump_request_frame > 20:  # Reduced from 60 to 20 frames
+            print(f"DEBUG: {self.player_name} jump request timed out (no execution for 20 frames)")
+            self._reset_jump_state(game)
+        
+        # Process jump button release (for short hop detection)
+        if not sprite.is_jumping and not sprite.in_air and not sprite.animation_locked:
+            # Check for jump button press - note this is different from just_activated
+            # We want to track the exact frame when the button was pressed
+            if not self.jump_requested and input_handler.get_intent(self.player_name, INTENTS['MOVE_UP']):
+                self.jump_requested = True
+                self.jump_request_frame = game.current_frame
+                print(f"DEBUG: {self.player_name} jump requested at frame {game.current_frame}")
+            
+            # Check for jump button release while requested but not executed
+            if self.jump_requested and not self.jump_executed and not input_handler.get_intent(self.player_name, INTENTS['MOVE_UP']):
+                frames_held = game.current_frame - self.jump_request_frame
+                
+                # Perform short hop if button was released quickly enough
+                if frames_held <= 7:  # Melee-accurate timing (characters typically have 3-7 frame windows)
+                    print(f"DEBUG: {self.player_name} performing SHORT HOP after releasing at frame {game.current_frame} (held for {frames_held} frames)")
+                    sprite.jump(is_short_hop=True)
+                else:
+                    print(f"DEBUG: {self.player_name} performing full jump after releasing at frame {game.current_frame} (held for {frames_held} frames)")
+                    sprite.jump(is_short_hop=False)
+                
+                # Reset jump tracking after executing jump
+                self.jump_executed = True
+                self.jump_requested = False
+                self.jump_request_frame = 0
+            
+            # If jump has been requested but not executed, and held long enough, perform full jump
+            if self.jump_requested and not self.jump_executed and input_handler.get_intent(self.player_name, INTENTS['MOVE_UP']):
+                frames_held = game.current_frame - self.jump_request_frame
+                
+                if frames_held >= 10:  # Execute full jump a bit after short hop window
+                    print(f"DEBUG: {self.player_name} performing FULL JUMP after holding for {frames_held} frames")
+                    sprite.jump(is_short_hop=False)
+                    
+                    # Reset jump tracking after executing jump
+                    self.jump_executed = True
+                    self.jump_requested = False
+                    self.jump_request_frame = 0
+        else:
+            # Reset jump tracking when landing or when in-air state changes
+            self._reset_jump_state(game)
+        
         # Process drop-through and fast fall (MOVE_DOWN intent)
         if input_handler.get_intent(self.player_name, INTENTS['MOVE_DOWN']):
             # Set flag on sprite for dropping through platforms
@@ -154,10 +207,6 @@ class PlayerController:
             # Clear the flag when input is released
             sprite.drop_through = False
             sprite.is_fast_falling = False
-        
-        # Process jump (MOVE_UP intent)
-        if input_handler.get_intent(self.player_name, INTENTS['MOVE_UP']) and not sprite.is_jumping and not sprite.in_air and not sprite.animation_locked:
-            sprite.jump()
         
         # Check if character can be controlled (not in middle of animation)
         if not hasattr(sprite, 'can_move') or not sprite.can_move():
@@ -183,12 +232,28 @@ class PlayerController:
                 # Air control is more limited
                 sprite.vel.x = max(sprite.vel.x - 0.2, -2)  # Slower horizontal air movement
             else:
-                # Ground movement is faster - use analog value for speed if available
-                if abs(x_axis) > 0.3:  # Only use analog value if significant movement detected
-                    sprite.vel.x = -3 * min(1.0, abs(x_axis))  # Scale speed by stick intensity
+                # Check if we're dashing or running based on Melee physics state
+                if hasattr(sprite, 'is_dashing') and sprite.is_dashing:
+                    # Use dash speed (faster initial acceleration)
+                    sprite.vel.x = -6.24 * min(1.0, abs(x_axis) if abs(x_axis) > 0.3 else 1.0)  # 6.24 for dash (30% faster than before)
+                    sprite.move = WALK  # We use WALK for dash animation too
+                    if game.controller_debug and game.current_frame % 30 == 0:
+                        print(f"DEBUG: {self.player_name} DASHING LEFT at speed {sprite.vel.x}")
+                elif hasattr(sprite, 'is_running') and sprite.is_running:
+                    # Use run speed (faster than walk)
+                    sprite.vel.x = -4.8 * min(1.0, abs(x_axis) if abs(x_axis) > 0.3 else 1.0)  # 4.8 for run (fastest sustained movement)
+                    sprite.move = WALK  # We use WALK for run animation too
+                    if game.controller_debug and game.current_frame % 30 == 0:
+                        print(f"DEBUG: {self.player_name} RUNNING LEFT at speed {sprite.vel.x}")
                 else:
-                    sprite.vel.x = -3  # Default speed for non-analog input
-                sprite.move = WALK
+                    # Regular walking - keep original speed of 3
+                    if abs(x_axis) > 0.3:  # Only use analog value if significant movement detected
+                        sprite.vel.x = -3.0 * min(1.0, abs(x_axis))  # Scale speed by stick intensity
+                    else:
+                        sprite.vel.x = -3.0  # Default speed for non-analog input
+                    sprite.move = WALK
+                    if game.controller_debug and game.current_frame % 30 == 0:
+                        print(f"DEBUG: {self.player_name} WALKING LEFT at speed {sprite.vel.x}")
                 
                 # Update walk animation frame counter (critical for animation)
                 # Only update every 5 frames to avoid animation being too fast
@@ -218,12 +283,28 @@ class PlayerController:
                 # Air control is more limited
                 sprite.vel.x = min(sprite.vel.x + 0.2, 2)  # Slower horizontal air movement
             else:
-                # Ground movement is faster - use analog value for speed if available
-                if abs(x_axis) > 0.3:  # Only use analog value if significant movement detected
-                    sprite.vel.x = 3 * min(1.0, abs(x_axis))  # Scale speed by stick intensity
+                # Check if we're dashing or running based on Melee physics state
+                if hasattr(sprite, 'is_dashing') and sprite.is_dashing:
+                    # Use dash speed (faster initial acceleration)
+                    sprite.vel.x = 6.24 * min(1.0, abs(x_axis) if abs(x_axis) > 0.3 else 1.0)  # 6.24 for dash (30% faster than before)
+                    sprite.move = WALK  # We use WALK for dash animation too
+                    if game.controller_debug and game.current_frame % 30 == 0:
+                        print(f"DEBUG: {self.player_name} DASHING RIGHT at speed {sprite.vel.x}")
+                elif hasattr(sprite, 'is_running') and sprite.is_running:
+                    # Use run speed (faster than walk)
+                    sprite.vel.x = 4.8 * min(1.0, abs(x_axis) if abs(x_axis) > 0.3 else 1.0)  # 4.8 for run (fastest sustained movement)
+                    sprite.move = WALK  # We use WALK for run animation too
+                    if game.controller_debug and game.current_frame % 30 == 0:
+                        print(f"DEBUG: {self.player_name} RUNNING RIGHT at speed {sprite.vel.x}")
                 else:
-                    sprite.vel.x = 3  # Default speed for non-analog input
-                sprite.move = WALK
+                    # Regular walking - keep original speed of 3
+                    if abs(x_axis) > 0.3:  # Only use analog value if significant movement detected
+                        sprite.vel.x = 3.0 * min(1.0, abs(x_axis))  # Scale speed by stick intensity
+                    else:
+                        sprite.vel.x = 3.0  # Default speed for non-analog input
+                    sprite.move = WALK
+                    if game.controller_debug and game.current_frame % 30 == 0:
+                        print(f"DEBUG: {self.player_name} WALKING RIGHT at speed {sprite.vel.x}")
                 
                 # Update walk animation frame counter (critical for animation)
                 # Only update every 5 frames to avoid animation being too fast
@@ -274,6 +355,15 @@ class PlayerController:
         player_data['direc'] = sprite.direc
         player_data['walk_c'] = str(sprite.walk_c)
         player_data['move'] = sprite.move 
+
+    def _reset_jump_state(self, game):
+        """Reset all jump tracking variables"""
+        if hasattr(self, 'jump_requested') and self.jump_requested:
+            print(f"DEBUG: {self.player_name} jump state reset at frame {game.current_frame}")
+        
+        self.jump_requested = False
+        self.jump_executed = False
+        self.jump_request_frame = 0
 
 # Add test code that runs when this file is executed directly
 if __name__ == "__main__":

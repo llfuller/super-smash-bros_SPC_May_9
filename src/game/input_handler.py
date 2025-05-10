@@ -48,6 +48,11 @@ class InputHandler:
         # Analog input values (for analog stick values)
         self.analog_values = {}  # Maps player_name+axis to values
         
+        # Jump button tracking for short hop detection
+        self.jump_press_frame = {}  # Tracks when jump button was pressed for each player
+        self.jump_release_frame = {}  # Tracks when jump button was released
+        self.current_frame = 0  # Current frame count for timing
+        
         # Controller settings
         self.deadzone = DEFAULT_SETTINGS['controller_deadzone']
         
@@ -176,6 +181,14 @@ class InputHandler:
         Args:
             events: List of pygame events
         """
+        # Increment the current frame
+        self.current_frame += 1
+        
+        # Store previous frame's intents first for jump tracking
+        prev_intents = {}
+        for player_name in self.player_intents:
+            prev_intents[player_name] = self.player_intents[player_name].copy()
+        
         # Collect ALL input states at the same time to ensure consistent timing
         keys_pressed = pg.key.get_pressed()
         
@@ -209,7 +222,7 @@ class InputHandler:
         
         # Store previous intent states for edge detection
         for player_name in self.player_intents:
-            self.prev_player_intents[player_name] = self.player_intents[player_name].copy()
+            self.prev_player_intents[player_name] = prev_intents[player_name]
             # Reset all intents to False
             for intent in INTENTS.values():
                 self.player_intents[player_name][intent] = False
@@ -284,6 +297,17 @@ class InputHandler:
             self.debug_frame_counter = 0
         self.debug_frame_counter += 1
         
+        # Track jump button press and release for short hop detection
+        self._update_jump_tracking()
+        
+        # Log current jump tracking state occasionally for debugging
+        if self.debug_frame_counter % 60 == 0:
+            for player_name in self.player_intents:
+                press_frame = self.jump_press_frame.get(player_name, 0)
+                release_frame = self.jump_release_frame.get(player_name, 0)
+                if press_frame > 0:
+                    print(f"DEBUG: {player_name} jump tracking state - press_frame: {press_frame}, held for {self.current_frame - press_frame} frames")
+        
         # Debug output
         if self.debug and self.debug_frame_counter % 60 == 0:
             for player_name, intents in self.player_intents.items():
@@ -292,72 +316,64 @@ class InputHandler:
                     print(f"{player_name} intents: {', '.join(active_intents)}")
     
     def _process_keyboard_for_player(self, player_name, keys_pressed, player_index):
-        """
-        Process keyboard inputs for a specific player based on index
-        
-        Args:
-            player_name: Name of the player
-            keys_pressed: Pygame key state dictionary
-            player_index: Index of player (0 for player 1, 1 for player 2)
-        """
+        """Process keyboard inputs for a specific player"""
+        # Get player intents
         intents = self.player_intents[player_name]
         
-        # Determine which control scheme to use based on player index
-        if player_index == 0:
-            # Player 1 keyboard controls (Arrow keys + Z/X)
-            if keys_pressed[pg.K_LEFT]:
-                intents[INTENTS['MOVE_LEFT']] = True
-            
-            # if keys_pressed[pg.K_RIGHT]:
-            #     intents[INTENTS['MOVE_RIGHT']] = True
-            
-            if keys_pressed[pg.K_UP]:
-                intents[INTENTS['MOVE_UP']] = True
-            
-            if keys_pressed[pg.K_DOWN]:
-                intents[INTENTS['MOVE_DOWN']] = True
-            
-            if keys_pressed[pg.K_z]:
-                intents[INTENTS['WEAK_ATTACK']] = True
-            
-            if keys_pressed[pg.K_x]:
-                intents[INTENTS['HEAVY_ATTACK']] = True
-            
-            # Shield - Use LEFT SHIFT for Player 1
-            if keys_pressed[pg.K_LSHIFT]:
-                intents[INTENTS['SHIELD']] = True
-            
-            if keys_pressed[pg.K_r]:
-                intents[INTENTS['RESTART']] = True
-            
-            if keys_pressed[pg.K_m]:
-                intents[INTENTS['MENU']] = True
-            
-            if keys_pressed[pg.K_q]:
-                intents[INTENTS['QUIT']] = True
-        else:
-            # Player 2 keyboard controls (WASD + G/H)
-            if keys_pressed[pg.K_a]:
-                intents[INTENTS['MOVE_LEFT']] = True
-            
-            if keys_pressed[pg.K_d]:
-                intents[INTENTS['MOVE_RIGHT']] = True
-            
-            if keys_pressed[pg.K_w]:
-                intents[INTENTS['MOVE_UP']] = True
-            
-            if keys_pressed[pg.K_s]:
-                intents[INTENTS['MOVE_DOWN']] = True
-            
-            if keys_pressed[pg.K_g]:
-                intents[INTENTS['WEAK_ATTACK']] = True
-            
-            if keys_pressed[pg.K_h]:
-                intents[INTENTS['HEAVY_ATTACK']] = True
-            
-            # Shield - Use E key for Player 2
-            if keys_pressed[pg.K_e]:
-                intents[INTENTS['SHIELD']] = True
+        # Default key assignments
+        # Player 1 uses arrow keys + Left Alt/Shift/Ctrl
+        # Player 2 uses WASD + E/Q/R keys
+        
+        # Create a list of keys to check based on player index
+        keys_to_check = [
+            # Player 1 keys (arrows + alt/shift/ctrl)
+            {
+                'left': pg.K_LEFT,
+                'right': pg.K_RIGHT,
+                'up': pg.K_UP,              # Jump
+                'down': pg.K_DOWN,
+                'weak_attack': pg.K_z,
+                'heavy_attack': pg.K_x,
+                'shield': pg.K_LSHIFT,
+                'menu': pg.K_ESCAPE,
+                'restart': pg.K_r,
+                'quit': pg.K_q
+            },
+            # Player 2 keys (WASD + E/Q/R)
+            {
+                'left': pg.K_a,
+                'right': pg.K_d,
+                'up': pg.K_w,               # Jump
+                'down': pg.K_s,
+                'weak_attack': pg.K_g,
+                'heavy_attack': pg.K_h,
+                'shield': pg.K_e,
+                'menu': pg.K_ESCAPE,
+                'restart': pg.K_r,
+                'quit': pg.K_q
+            }
+        ]
+        
+        # Get key assignments for this player
+        keys = keys_to_check[min(player_index, len(keys_to_check) - 1)]
+        
+        # Process movement intents
+        intents[INTENTS['MOVE_LEFT']] = keys_pressed[keys['left']]
+        intents[INTENTS['MOVE_RIGHT']] = keys_pressed[keys['right']]
+        intents[INTENTS['MOVE_UP']] = keys_pressed[keys['up']]
+        intents[INTENTS['MOVE_DOWN']] = keys_pressed[keys['down']]
+        
+        # Process attack intents
+        intents[INTENTS['WEAK_ATTACK']] = keys_pressed[keys['weak_attack']]
+        intents[INTENTS['HEAVY_ATTACK']] = keys_pressed[keys['heavy_attack']]
+        
+        # Process shield intent
+        intents[INTENTS['SHIELD']] = keys_pressed[keys['shield']]
+        
+        # Process game control intents
+        intents[INTENTS['MENU']] = keys_pressed[keys['menu']]
+        intents[INTENTS['RESTART']] = keys_pressed[keys['restart']]
+        intents[INTENTS['QUIT']] = keys_pressed[keys['quit']]
     
     def _process_keyboard(self, keys_pressed):
         """
@@ -396,80 +412,64 @@ class InputHandler:
                     if self.debug and self.debug_frame_counter % 30 == 0:
                         print(f"{player_name} button {button} -> {intent}")
             
-            # Check for X and Y buttons to work as jump
-            if state['buttons'] and len(state['buttons']) > 3:  # Make sure we have enough buttons
-                # Get button indices from PRO_CONTROLLER configuration
-                y_button = PRO_CONTROLLER['y_button']
-                x_button = PRO_CONTROLLER['x_button']
-                a_button = PRO_CONTROLLER['a_button']
-                l_button = PRO_CONTROLLER['l_button']
-                r_button = PRO_CONTROLLER['r_button']
-                zl_button = PRO_CONTROLLER['zl_button']
-                zr_button = PRO_CONTROLLER['zr_button']
-                
-                # Check if the buttons are pressed
-                if y_button < len(state['buttons']) and state['buttons'][y_button]:  # Y button
-                    intents[INTENTS['MOVE_UP']] = True
-                    if self.debug and self.debug_frame_counter % 30 == 0:
-                        print(f"{player_name} Y button ({y_button}) -> MOVE_UP (jump)")
-                
-                if x_button < len(state['buttons']) and state['buttons'][x_button]:  # X button
-                    intents[INTENTS['MOVE_UP']] = True
-                    if self.debug and self.debug_frame_counter % 30 == 0:
-                        print(f"{player_name} X button ({x_button}) -> MOVE_UP (jump)")
-                
-                # Also add A button as a jump button for more controller compatibility
-                if a_button < len(state['buttons']) and state['buttons'][a_button]:  # A button
-                    intents[INTENTS['MOVE_UP']] = True
-                    if self.debug and self.debug_frame_counter % 30 == 0:
-                        print(f"{player_name} A button ({a_button}) -> MOVE_UP (jump)")
-                
-                # Check for shield buttons (L and R)
-                # First try the specifically named buttons
-                shield_active = False
-                # Debug all button states to find which ones are pressed
-                if self.debug and self.debug_frame_counter % 10 == 0:
-                    # Print active buttons for debugging
-                    active_buttons = []
-                    for i, pressed in enumerate(state['buttons']):
-                        if pressed:
-                            active_buttons.append(str(i))
-                    if active_buttons:
-                        print(f"DEBUG: {player_name} active buttons: [{', '.join(active_buttons)}]")
+            # Check for Y button to work as jump
+            y_button = min(PRO_CONTROLLER['y_button'], len(state['buttons'])-1)
+            if y_button >= 0 and state['buttons'][y_button]:
+                intents[INTENTS['MOVE_UP']] = True
+                if self.debug and self.debug_frame_counter % 30 == 0:
+                    print(f"{player_name} Y button ({y_button}) -> MOVE_UP (jump)")
+            
+            # A button as jump
+            a_button = min(PRO_CONTROLLER['a_button'], len(state['buttons'])-1)
+            if a_button >= 0 and state['buttons'][a_button]:
+                intents[INTENTS['MOVE_UP']] = True
+                if self.debug and self.debug_frame_counter % 30 == 0:
+                    print(f"{player_name} A button ({a_button}) -> MOVE_UP (jump)")
+            
+            # Debug all button states to find which ones are pressed
+            if self.debug and self.debug_frame_counter % 10 == 0:
+                # Print active buttons for debugging
+                active_buttons = []
+                for i, pressed in enumerate(state['buttons']):
+                    if pressed:
+                        active_buttons.append(str(i))
+                if active_buttons:
+                    print(f"DEBUG: {player_name} active buttons: [{', '.join(active_buttons)}]")
 
-                # Check the main shield buttons (L, R, ZL, ZR)
-                if ((l_button < len(state['buttons']) and state['buttons'][l_button])):
-                    shield_active = True
-                    if self.debug:
-                        print(f"DEBUG: {player_name} L button ({l_button}) pressed for shield")
-                elif ((r_button < len(state['buttons']) and state['buttons'][r_button])):
-                    shield_active = True
-                    if self.debug:
-                        print(f"DEBUG: {player_name} R button ({r_button}) pressed for shield")
-                elif ((zl_button < len(state['buttons']) and state['buttons'][zl_button])):
-                    shield_active = True
-                    if self.debug:
-                        print(f"DEBUG: {player_name} ZL button ({zl_button}) pressed for shield")
-                elif ((zr_button < len(state['buttons']) and state['buttons'][zr_button])):
-                    shield_active = True
-                    if self.debug:
-                        print(f"DEBUG: {player_name} ZR button ({zr_button}) pressed for shield")
+            # Check the main shield buttons (L, R, ZL, ZR)
+            shield_active = False
+            if (PRO_CONTROLLER['l_button'] < len(state['buttons']) and state['buttons'][PRO_CONTROLLER['l_button']]):
+                shield_active = True
+                if self.debug:
+                    print(f"DEBUG: {player_name} L button ({PRO_CONTROLLER['l_button']}) pressed for shield")
+            elif (PRO_CONTROLLER['r_button'] < len(state['buttons']) and state['buttons'][PRO_CONTROLLER['r_button']]):
+                shield_active = True
+                if self.debug:
+                    print(f"DEBUG: {player_name} R button ({PRO_CONTROLLER['r_button']}) pressed for shield")
+            elif (PRO_CONTROLLER['zl_button'] < len(state['buttons']) and state['buttons'][PRO_CONTROLLER['zl_button']]):
+                shield_active = True
+                if self.debug:
+                    print(f"DEBUG: {player_name} ZL button ({PRO_CONTROLLER['zl_button']}) pressed for shield")
+            elif (PRO_CONTROLLER['zr_button'] < len(state['buttons']) and state['buttons'][PRO_CONTROLLER['zr_button']]):
+                shield_active = True
+                if self.debug:
+                    print(f"DEBUG: {player_name} ZR button ({PRO_CONTROLLER['zr_button']}) pressed for shield")
 
-                # If that didn't work, try the generic shield_buttons array as fallback
-                if not shield_active and 'shield_buttons' in PRO_CONTROLLER:
-                    for btn_idx in PRO_CONTROLLER['shield_buttons']:
-                        if btn_idx < len(state['buttons']) and state['buttons'][btn_idx]:
-                            shield_active = True
-                            if self.debug:
-                                print(f"DEBUG: {player_name} shield button {btn_idx} pressed via fallback array")
-                            break
-                
-                # Set the shield intent if any shield button is active
-                if shield_active:
-                    intents[INTENTS['SHIELD']] = True
-                    # Always print shield activation in debug mode (regardless of frame)
-                    if self.debug:
-                        print(f"DEBUG: {player_name} SHIELD intent activated - shield button pressed")
+            # If that didn't work, try the generic shield_buttons array as fallback
+            if not shield_active and 'shield_buttons' in PRO_CONTROLLER:
+                for btn_idx in PRO_CONTROLLER['shield_buttons']:
+                    if btn_idx < len(state['buttons']) and state['buttons'][btn_idx]:
+                        shield_active = True
+                        if self.debug:
+                            print(f"DEBUG: {player_name} shield button {btn_idx} pressed via fallback array")
+                        break
+            
+            # Set the shield intent if any shield button is active
+            if shield_active:
+                intents[INTENTS['SHIELD']] = True
+                # Always print shield activation in debug mode (regardless of frame)
+                if self.debug:
+                    print(f"DEBUG: {player_name} SHIELD intent activated - shield button pressed")
             
             # Get analog stick values
             x_axis = 0.0
@@ -640,6 +640,65 @@ class InputHandler:
             import traceback
             traceback.print_exc()
             controller['connected'] = False
+
+    def _update_jump_tracking(self):
+        """Update jump button press and release tracking for short hop detection"""
+        for player_name in self.player_intents:
+            # Get the current and previous jump button state
+            current_jump_pressed = self.get_intent(player_name, INTENTS['MOVE_UP'])
+            previous_jump_pressed = self.prev_player_intents[player_name].get(INTENTS['MOVE_UP'], False)
+            
+            # Check for button press (rising edge)
+            if current_jump_pressed and not previous_jump_pressed:
+                # Reset any previous release frame
+                self.jump_release_frame[player_name] = 0
+                
+                # Record the press frame if not already set
+                if self.jump_press_frame.get(player_name, 0) == 0:
+                    self.jump_press_frame[player_name] = self.current_frame
+                    print(f"DEBUG: {player_name} jump button PRESSED at frame {self.current_frame}")
+            
+            # Check for button release (falling edge)
+            elif not current_jump_pressed and previous_jump_pressed:
+                press_frame = self.jump_press_frame.get(player_name, 0)
+                
+                # Only record release if we have a valid press
+                if press_frame > 0:
+                    self.jump_release_frame[player_name] = self.current_frame
+                    frames_held = self.current_frame - press_frame
+                    print(f"DEBUG: {player_name} jump button RELEASED at frame {self.current_frame} (held for {frames_held} frames)")
+            
+            # Reset stale jump presses
+            press_frame = self.jump_press_frame.get(player_name, 0)
+            if press_frame > 0 and self.current_frame - press_frame > 20:  # Reduced from 60 to 20 frames
+                print(f"DEBUG: Clearing stale jump press for {player_name} (held for too long without release)")
+                self.jump_press_frame[player_name] = 0
+                self.jump_release_frame[player_name] = 0
+    
+    def is_short_hop(self, player_name):
+        """Check if player performed a short hop (quick press and release of jump button)"""
+        # Get the frame numbers for this player
+        press_frame = self.jump_press_frame.get(player_name, 0)
+        release_frame = self.jump_release_frame.get(player_name, 0)
+        
+        # Check if we have valid press and release data
+        if press_frame > 0 and release_frame > press_frame:
+            # Check if button was released quickly enough for short hop
+            frames_held = release_frame - press_frame
+            is_short_hop = frames_held <= 7  # Melee-accurate timing (typically 3-7 frames)
+            
+            if is_short_hop:
+                print(f"DEBUG: {player_name} performed short hop (held for {frames_held} frames)")
+            else:
+                print(f"DEBUG: {player_name} pressed jump too long for short hop (held for {frames_held} frames)")
+            
+            # Reset tracking after checking
+            self.jump_press_frame[player_name] = 0
+            self.jump_release_frame[player_name] = 0
+            
+            return is_short_hop
+        
+        return False
 
 # Create a global instance
 input_handler = InputHandler() 
