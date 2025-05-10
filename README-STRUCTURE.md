@@ -27,10 +27,12 @@ This document provides a comprehensive overview of the project's directory struc
 │   │   ├── Game.py
 │   │   ├── Server.py
 │   │   ├── Chat.py
+│   │   ├── LocalGame.py
 │   │   ├── settings.py
 │   │   └── images.py
 │   ├── proto/
 │   └── images/
+├── play_local.py
 ```
 
 ## Core Game Components
@@ -49,6 +51,17 @@ The main game file that brings everything together. It initializes the game, man
 - Win/loss detection
 
 This is the entry point for players to start the game.
+
+### LocalGame.py
+
+A standalone local multiplayer version of the game that doesn't require a server. Key features:
+
+- Support for two players on a single instance
+- Keyboard controls for player 1
+- Controller support for player 2 (with keyboard fallback if no controller is connected)
+- Character selection for both players
+- Local game state management
+- Simplified UI for local play
 
 ### Server.py
 
@@ -126,7 +139,41 @@ The game uses a client-server architecture with:
 1. **UDP Communication** (via Server.py): For real-time game state updates where occasional packet loss is acceptable
 2. **TCP Communication** (via Chat.py): For reliable chat messaging where all messages must be delivered in order
 
-## How to Play
+## Local Multiplayer Mode
+
+The local multiplayer mode allows you to play with two players on a single instance without needing to set up a server.
+
+### How to Play in Local Multiplayer Mode
+
+1. Run the game launcher: `python play_local.py`
+2. Use the keyboard and an optional controller to play with two players
+3. Select characters for both players (Player 1 selects first, then Player 2)
+4. Battle in a local arena without server requirements
+
+### Controls for Local Multiplayer
+
+#### Player 1 (Keyboard)
+- Arrow Keys: Move character
+- Up Arrow: Jump
+- Z: Weak attack
+- X: Heavy attack
+
+#### Player 2 (Controller)
+- D-pad or Left Analog Stick: Move character
+- D-pad Up or Left Stick Up: Jump
+- Button A (or equivalent): Weak attack
+- Button B (or equivalent): Heavy attack
+
+If no controller is connected, Player 2 can also use the keyboard.
+
+### Advantages of Local Multiplayer
+- No server setup required
+- Quick to start and play
+- Same gameplay experience as the networked version
+- Support for gamepads/controllers
+- Easy character selection process
+
+## How to Play (Original Network Mode)
 
 1. Start the server: `python Server.py`
 2. Launch the game: `python Game.py <server_ip_address>`
