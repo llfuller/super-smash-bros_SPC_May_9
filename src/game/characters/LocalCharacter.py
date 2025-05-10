@@ -6,6 +6,18 @@ sys.path.append("..")
 from settings import *
 from images import *
 
+# Add new animation state
+LANDING = 'landing'
+
+# Character size scaling factor
+CHARACTER_SCALE = 2.0
+
+# Movement speed multiplier (horizontal only)
+MOVEMENT_SPEED_MULTIPLIER = 2.0
+
+# Jump height adjustment to compensate for larger character size
+JUMP_HEIGHT_FACTOR = 1.0  # Adjust this to control jump height
+
 vec = pg.math.Vector2
 
 # This is a modified base character class that doesn't rely on hardcoded keyboard input
@@ -25,77 +37,199 @@ class LocalCharacter(pg.sprite.Sprite):
         self.health = health
         self.weak = weak_damage
         self.heavy = heavy_damage
-        self.acce = acceleration
+        # Double the horizontal acceleration for faster movement
+        self.acce = acceleration * MOVEMENT_SPEED_MULTIPLIER
         
         # Position and movement
-        self.pos = pos
+        self.pos = vec(pos[0], pos[1])  # Convert to Vector2 for consistency
         self.direc = direc
         self.walk_c = walk_c if walk_c is not None else 0
         self.move = move
         
-        # Graphics
-        self.walkR = images_walk_r
-        self.walkL = images_walk_l
-        self.standR = image_stand_r
-        self.standL = image_stand_l
-        self.weakR = image_weak_r
-        self.weakL = image_weak_l
-        self.heavyR = image_heavy_r
-        self.heavyL = image_heavy_l
-        self.damagedR = image_damaged_r
-        self.damagedL = image_damaged_l
-        self.dead_image = image_dead
+        # Animation state variables
+        self.animation_frame_counter = 0
+        self.animation_locked = False
+        self.animation_lock_timer = 0
+        self.animation_lock_duration = 0
+        self.in_air = False
+        self.landing_lag = 0
+        
+        # Platform drop-through variables
+        self.drop_through = False  # Flag set by controller when down is pressed
+        self.ignore_platform_collision = False  # Flag to ignore platform collisions when dropping through
+        self.platform_drop_cooldown = 0  # Cooldown timer to prevent immediate re-collision
+        
+        # Attack recovery timers (in frames)
+        self.weak_attack_recovery = 20
+        self.heavy_attack_recovery = 35
+        self.landing_recovery = 10  # Base landing recovery
+        self.damage_stun = 15  # Base stun from taking damage
+        
+        # Graphics - scale all images to 2x size
+        self.walkR = [self.scale_image(img) for img in images_walk_r]
+        self.walkL = [self.scale_image(img) for img in images_walk_l]
+        self.standR = self.scale_image(image_stand_r)
+        self.standL = self.scale_image(image_stand_l)
+        self.weakR = self.scale_image(image_weak_r)
+        self.weakL = self.scale_image(image_weak_l)
+        self.heavyR = self.scale_image(image_heavy_r)
+        self.heavyL = self.scale_image(image_heavy_l)
+        self.damagedR = self.scale_image(image_damaged_r)
+        self.damagedL = self.scale_image(image_damaged_l)
+        self.dead_image = self.scale_image(image_dead)
         
         # Physics
         self.game = game
-        self.image = self.standR
+        
+        # Set initial image based on direction
+        if self.direc == LEFT:
+            self.image = self.standL
+        else:
+            self.image = self.standR
+            
         self.rect = self.image.get_rect()
-        self.rect.center = (GAME_WIDTH / 2, HEIGHT / 2)
+        
+        # Important: Set midbottom instead of center to ensure character stands on platforms
+        self.rect.midbottom = self.pos
+        
         self.vel = vec(0, 0)
         self.acc = vec(0, 0)
         
         # Input flag - whether this character should be controlled by keyboard
         self.process_input = False
-        
+    
+    def scale_image(self, image):
+        """Scale an image to the desired size (2x)"""
+        current_width = image.get_width()
+        current_height = image.get_height()
+        new_width = int(current_width * CHARACTER_SCALE)
+        new_height = int(current_height * CHARACTER_SCALE)
+        return pg.transform.scale(image, (new_width, new_height))
+
     def jump(self):
+        # Only allow jump if not animation locked
+        if self.animation_locked:
+            # Cannot jump during landing lag or other locked animations
+            return
+            
+        # Only allow jumping if on the ground (not in air)
+        if self.in_air:
+            return
+            
         self.rect.x += 1
         collision = pg.sprite.spritecollide(self, self.game.platforms, False)
         self.rect.x -= 1
         if collision:
-            self.vel.y = -VEL
+            # Use normal jump velocity × jump height factor for proper jump height
+            self.vel.y = -VEL * JUMP_HEIGHT_FACTOR
+            self.in_air = True
 
     def weakAttack(self):
-        if self.health > 0 and not self.game.chatting:
-            # Use the character's own enemy_sprites group if available, otherwise fall back to game.enemy_sprites
+        # Only allow attack if not already in an attack animation or damaged
+        if self.animation_locked or self.move in [WEAK_ATTACK, HEAVY_ATTACK, DAMAGED, LANDING] or self.health <= 0:
+            return
+            
+        if not self.game.chatting:
+            # Lock animation for weak attack duration
+            self.animation_locked = True
+            self.animation_lock_timer = 0
+            self.animation_lock_duration = self.weak_attack_recovery
+            self.move = WEAK_ATTACK
+            
+            # Check collision with enemies
             enemy_group = getattr(self, 'enemy_sprites', self.game.enemy_sprites)
             collided_enemies = pg.sprite.spritecollide(self, enemy_group, False)
             for enemy in collided_enemies:
                 enemy.health -= self.weak
                 enemy.move = DAMAGED
+                # Start enemy damage animation lock
+                enemy.animation_locked = True
+                enemy.animation_lock_timer = 0
+                enemy.animation_lock_duration = self.damage_stun
                 self.game.attackPlayer(enemy.name, self.weak, DAMAGED)
                 if enemy.health < 0:
                     enemy.health = 0
 
     def heavyAttack(self):
-        if self.health > 0 and not self.game.chatting:
-            # Use the character's own enemy_sprites group if available, otherwise fall back to game.enemy_sprites
+        # Only allow attack if not already in an attack animation or damaged
+        if self.animation_locked or self.move in [WEAK_ATTACK, HEAVY_ATTACK, DAMAGED, LANDING] or self.health <= 0:
+            return
+            
+        if not self.game.chatting:
+            # Lock animation for heavy attack duration
+            self.animation_locked = True
+            self.animation_lock_timer = 0
+            self.animation_lock_duration = self.heavy_attack_recovery
+            self.move = HEAVY_ATTACK
+            
+            # Check collision with enemies
             enemy_group = getattr(self, 'enemy_sprites', self.game.enemy_sprites)
             collided_enemies = pg.sprite.spritecollide(self, enemy_group, False)
             for enemy in collided_enemies:
                 enemy.health -= self.heavy
                 enemy.move = DAMAGED
+                # Start enemy damage animation lock
+                enemy.animation_locked = True
+                enemy.animation_lock_timer = 0
+                enemy.animation_lock_duration = self.damage_stun * 1.5
                 self.game.attackPlayer(enemy.name, self.heavy, DAMAGED)
                 if enemy.health < 0:
                     enemy.health = 0
     
     def update(self):
-        self.acc = vec(0, 0.5)
+        # Handle animation lock timers
+        if self.animation_locked:
+            self.animation_lock_timer += 1
+            if self.animation_lock_timer >= self.animation_lock_duration:
+                self.animation_locked = False
+                # After lock expires, return to standing if not moving
+                if self.move in [WEAK_ATTACK, HEAVY_ATTACK, DAMAGED, LANDING]:
+                    self.move = STAND
+        
+        # Handle platform drop-through cooldown
+        if self.platform_drop_cooldown > 0:
+            self.platform_drop_cooldown -= 1
+            # If cooldown expires, stop ignoring platform collisions
+            if self.platform_drop_cooldown <= 0:
+                self.ignore_platform_collision = False
+        
+        # Check if down is pressed while on a platform
+        if self.drop_through and not self.in_air and not self.ignore_platform_collision:
+            # Start ignoring platform collisions
+            self.ignore_platform_collision = True
+            self.platform_drop_cooldown = 10  # Ignore collisions for 10 frames
+            self.in_air = True
+            # Give a little push downward to ensure falling
+            self.vel.y = 1.0
+            print(f"Player {self.name} dropping through platform")
         
         # Update physics
+        self.acc = vec(0, 0.5)  # Gravity
         self.acc.x += self.vel.x * FRIC
         self.vel += self.acc
         self.pos += self.vel + 0.5 * self.acc
 
+        # Detect landing from air
+        was_in_air = self.in_air
+        if self.vel.y > 0:
+            # Only check platform collisions if not ignoring them
+            if not self.ignore_platform_collision:
+                collision = pg.sprite.spritecollide(self, self.game.platforms, False)
+                if collision:
+                    # If we were in the air and now landed
+                    if was_in_air:
+                        self.apply_landing_lag()
+                    
+                    self.pos[1] = collision[0].rect.top + 1
+                    self.vel[1] = 0
+                    self.in_air = False
+            else:
+                # If ignoring platforms, always consider in the air
+                self.in_air = True
+        else:
+            # In the air if velocity is upward
+            self.in_air = True
+        
         # Update sprite image based on current state
         self.update_sprite_image()
         
@@ -103,19 +237,51 @@ class LocalCharacter(pg.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.midbottom = self.pos
 
-        # Handle platform collisions
-        if self.vel.y > 0:
-            collision = pg.sprite.spritecollide(self, self.game.platforms, False)
-            if collision:
-                self.pos[1] = collision[0].rect.top + 1
-                self.vel[1] = 0
+    def apply_landing_lag(self):
+        """Apply landing lag based on vertical velocity and other factors"""
+        # Calculate landing lag based on fall speed (higher fall = more lag)
+        fall_intensity = abs(self.vel.y) / 15.0  # Normalize
+        
+        # Landing lag of 10 frames as requested
+        base_lag_frames = 10
+        
+        # No additional velocity-based lag 
+        velocity_lag = 0
+        
+        # Set landing lag and animation lock
+        self.landing_lag = int(base_lag_frames + velocity_lag)
+        self.animation_locked = True
+        self.animation_lock_timer = 0
+        self.animation_lock_duration = self.landing_lag
+        
+        # Visual feedback - special landing animation
+        self.move = LANDING
+        
+        # Debug output
+        print(f"Landing lag: {self.landing_lag} frames (vel.y: {self.vel.y:.2f})")
 
     def update_sprite_image(self):
         """Update the sprite's image based on current movement state"""
+        # Animation frame counter for controlling animation speed
+        self.animation_frame_counter += 1
+        
+        # Slow down walk animations by 4x (update every 20 frames instead of 5)
+        # For other animations, keep the normal speed (every 5 frames)
+        should_update_walk = self.animation_frame_counter % 20 == 0
+        should_update_other = self.animation_frame_counter % 5 == 0
+        
         if self.move == WALK:
             if self.direc == LEFT:
+                # Only update walk_c when should_update_walk is True (4x slower)
+                if should_update_walk:
+                    max_walk = len(self.walkL) - 1
+                    self.walk_c = (self.walk_c + 1) % max(1, max_walk)
                 self.image = self.walkL[min(self.walk_c, len(self.walkL)-1)]
             elif self.direc == RIGHT:
+                # Only update walk_c when should_update_walk is True (4x slower)
+                if should_update_walk:
+                    max_walk = len(self.walkR) - 1
+                    self.walk_c = (self.walk_c + 1) % max(1, max_walk)
                 self.image = self.walkR[min(self.walk_c, len(self.walkR)-1)]
         
         elif self.move == STAND:
@@ -136,7 +302,8 @@ class LocalCharacter(pg.sprite.Sprite):
             elif self.direc == RIGHT:
                 self.image = self.heavyR
         
-        elif self.move == DAMAGED:
+        elif self.move == DAMAGED or self.move == LANDING:
+            # Both damaged and landing use the same animation for now
             if self.direc == LEFT:
                 self.image = self.damagedL
             elif self.direc == RIGHT:
@@ -145,12 +312,17 @@ class LocalCharacter(pg.sprite.Sprite):
         if self.health <= 0:
             self.image = self.dead_image
 
+    def can_move(self):
+        """Check if character can be controlled by movement inputs"""
+        return not self.animation_locked and self.health > 0
+
 # Create local character versions of each character
 
 # Mario - has maM1 through maM7
 class LocalMario(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
-        walkR = [maS1, maM1, maM2, maM3, maM4, maM5, maM6, maM7]
+        # Remove standing sprite from walk animation
+        walkR = [maM1, maM2, maM3, maM4, maM5, maM6, maM7]
         walkL = [pg.transform.flip(image, True, False) for image in walkR]
         standR = maS1
         standL = pg.transform.flip(standR, True, False)
@@ -172,7 +344,8 @@ class LocalMario(LocalCharacter):
 # Luigi - has luM1 through luM8
 class LocalLuigi(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
-        walkR = [luS1, luM1, luM2, luM3, luM4, luM5, luM6, luM7, luM8]
+        # Remove standing sprite from walk animation
+        walkR = [luM1, luM2, luM3, luM4, luM5, luM6, luM7, luM8]
         walkL = [pg.transform.flip(image, True, False) for image in walkR]
         standR = luS1
         standL = pg.transform.flip(standR, True, False)
@@ -194,7 +367,8 @@ class LocalLuigi(LocalCharacter):
 # Yoshi - has yoM1 through yoM8
 class LocalYoshi(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
-        walkR = [yoS1, yoM1, yoM2, yoM3, yoM4, yoM5, yoM6, yoM7, yoM8]
+        # Remove standing sprite from walk animation
+        walkR = [yoM1, yoM2, yoM3, yoM4, yoM5, yoM6, yoM7, yoM8]
         walkL = [pg.transform.flip(image, True, False) for image in walkR]
         standR = yoS1
         standL = pg.transform.flip(standR, True, False)
@@ -216,8 +390,8 @@ class LocalYoshi(LocalCharacter):
 # Popo
 class LocalPopo(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
-        # Popo only has 3 movement sprites
-        walkL = [poS1, poM1, poM2, poM3]
+        # Popo only has 3 movement sprites - remove standing sprite
+        walkL = [poM1, poM2, poM3]
         walkR = [pg.transform.flip(image, True, False) for image in walkL]
         standL = poS1
         standR = pg.transform.flip(standL, True, False)
@@ -239,8 +413,8 @@ class LocalPopo(LocalCharacter):
 # Nana
 class LocalNana(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
-        # Nana only has 3 movement sprites
-        walkL = [naS1, naM1, naM2, naM3]
+        # Nana only has 3 movement sprites - remove standing sprite
+        walkL = [naM1, naM2, naM3]
         walkR = [pg.transform.flip(image, True, False) for image in walkL]
         standL = naS1
         standR = pg.transform.flip(standL, True, False)
@@ -262,7 +436,8 @@ class LocalNana(LocalCharacter):
 # Link - has liM1 through liM10
 class LocalLink(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
-        walkR = [liS1, liM1, liM2, liM3, liM4, liM5, liM6, liM7, liM8, liM9, liM10]
+        # Remove standing sprite from walk animation
+        walkR = [liM1, liM2, liM3, liM4, liM5, liM6, liM7, liM8, liM9, liM10]
         walkL = [pg.transform.flip(image, True, False) for image in walkR]
         standR = liS1
         standL = pg.transform.flip(standR, True, False)

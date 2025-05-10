@@ -29,6 +29,7 @@ from menus.Start import Start
 from objects.Platform import Platform
 from settings import *
 from images import *
+from platform_layouts import get_layout  # Import the platform layouts
 
 print()
 print('========== SUPER SMASH BROS - Local Two-Player Edition ==========')
@@ -46,10 +47,11 @@ print('UPDATES (errors will show up here if ever):')
 
 # Controller class to abstract keyboard input
 class KeyboardController:
-    def __init__(self, up_key, left_key, right_key, weak_key, heavy_key, player_name):
+    def __init__(self, up_key, left_key, right_key, down_key, weak_key, heavy_key, player_name):
         self.up_key = up_key
         self.left_key = left_key
         self.right_key = right_key
+        self.down_key = down_key  # Add down key for platform drop-through
         self.weak_key = weak_key
         self.heavy_key = heavy_key
         self.player_name = player_name
@@ -76,23 +78,52 @@ class KeyboardController:
         if self.player_name not in game.players or 'sprite' not in game.players[self.player_name]:
             return
             
-        if float(game.players[self.player_name]['health']) <= 0 or not game.playing:
-            return
-            
         player_data = game.players[self.player_name]
         sprite = player_data['sprite']
         
-        # Reset movement state
-        sprite.acc = pg.math.Vector2(0, 0.5)  # Reset acceleration but keep gravity
-        sprite.move = STAND
+        # Don't process movement if player is dead or game is not in play
+        if float(player_data['health']) <= 0 or not game.playing:
+            return
         
-        # Jump
-        if keys[self.up_key]:
+        # Reset acceleration but keep gravity
+        sprite.acc = pg.math.Vector2(0, 0.5)
+        
+        # Check if character can be controlled (not in middle of animation)
+        if not hasattr(sprite, 'can_move') or not sprite.can_move():
+            # Still update player data from sprite to ensure synchronized state
+            player_data['xPos'] = str(sprite.pos[0])
+            player_data['yPos'] = str(sprite.pos[1])
+            player_data['direc'] = sprite.direc
+            player_data['walk_c'] = str(sprite.walk_c)
+            player_data['move'] = sprite.move
+            
+            # Continue physics updates even if locked in animation
+            sprite.acc.x += sprite.vel.x * FRIC
+            sprite.vel += sprite.acc
+            sprite.pos += sprite.vel + 0.5 * sprite.acc
+            
+            # Update collision rect
+            sprite.rect = sprite.image.get_rect()
+            sprite.rect.midbottom = sprite.pos
+            return
+        
+        # Track if we're moving horizontally this frame
+        is_moving_horizontally = False
+        
+        # Check for drop-through platform input
+        if keys[self.down_key]:
+            # Set a flag on sprite for dropping through platforms
+            sprite.drop_through = True
+        else:
+            sprite.drop_through = False
+        
+        # Jump - check if not in landing lag or other animation lock
+        if keys[self.up_key] and not sprite.animation_locked and not sprite.in_air:
             sprite.jump()
-            sprite.walk_c = 0
         
         # Move left
         if keys[self.left_key] and float(player_data['xPos']) > 40:
+            is_moving_horizontally = True
             sprite.acc.x = -sprite.acce
             # Make sure walk_c doesn't go out of bounds
             walk_count = getattr(sprite, 'walk_c', 0)
@@ -110,6 +141,7 @@ class KeyboardController:
         
         # Move right
         elif keys[self.right_key] and float(player_data['xPos']) < GAME_WIDTH-40:
+            is_moving_horizontally = True
             sprite.acc.x = sprite.acce
             # Make sure walk_c doesn't go out of bounds
             walk_count = getattr(sprite, 'walk_c', 0)
@@ -125,9 +157,16 @@ class KeyboardController:
             player_data['move'] = WALK
             player_data['walk_c'] = str(sprite.walk_c)
         
-        # If not moving horizontally, make sure walk count is reset
-        else:
+        # If not moving horizontally and not in air, reset to standing
+        if not is_moving_horizontally and not getattr(sprite, 'in_air', False):
             sprite.walk_c = 0
+            
+            # Only transition to STAND if not in another animation
+            if sprite.move == WALK:
+                sprite.move = STAND
+                player_data['move'] = STAND
+                
+            player_data['walk_c'] = '0'
             
         # Update physics
         sprite.acc.x += sprite.vel.x * FRIC
@@ -138,15 +177,7 @@ class KeyboardController:
         player_data['xPos'] = str(sprite.pos[0])
         player_data['yPos'] = str(sprite.pos[1])
         
-        # Update collision rectangle and handle platform collisions 
-        sprite.rect = sprite.image.get_rect()
-        sprite.rect.midbottom = sprite.pos
-        
-        if sprite.vel.y > 0:
-            collision = pg.sprite.spritecollide(sprite, game.platforms, False)
-            if collision:
-                sprite.pos[1] = collision[0].rect.top + 1
-                sprite.vel[1] = 0
+        # Update collision rectangle - let sprite's update handle platform collision
 
 class LocalGame:
     # ========================= IMPORTANT METHODS =========================
@@ -209,13 +240,13 @@ class LocalGame:
         if self.player_names[0]:
             # Player 1: Arrow keys and Z/X for attacks
             self.controllers[self.player_names[0]] = KeyboardController(
-                pg.K_UP, pg.K_LEFT, pg.K_RIGHT, pg.K_z, pg.K_x, self.player_names[0]
+                pg.K_UP, pg.K_LEFT, pg.K_RIGHT, pg.K_DOWN, pg.K_z, pg.K_x, self.player_names[0]
             )
         
         if self.player_names[1]:
             # Player 2: WASD and G/H for attacks
             self.controllers[self.player_names[1]] = KeyboardController(
-                pg.K_w, pg.K_a, pg.K_d, pg.K_g, pg.K_h, self.player_names[1]
+                pg.K_w, pg.K_a, pg.K_d, pg.K_s, pg.K_g, pg.K_h, self.player_names[1]
             )
 
     def run(self):
@@ -253,22 +284,21 @@ class LocalGame:
         self.loadPlatforms()
         self.run()
 
-    def loadPlatforms(self):
-        base = Platform('floor', 0, HEIGHT-30, GAME_WIDTH, 30)
-        self.all_sprites.add(base)
-        self.platforms.add(base)
-
-        plat1 = Platform('platform', 60, 460, 200, 50)
-        self.all_sprites.add(plat1)
-        self.platforms.add(plat1)
-
-        plat2 = Platform('platform', 435, 460, 200, 50)
-        self.all_sprites.add(plat2)
-        self.platforms.add(plat2)
-
-        plat3 = Platform('platform', 250, 260, 200, 50)
-        self.all_sprites.add(plat3)
-        self.platforms.add(plat3)
+    def loadPlatforms(self, layout_name='standard'):
+        """Load platforms based on a named layout configuration"""
+        # Get the platform layout configuration
+        platform_layout = get_layout(layout_name)
+        
+        # Clear existing platforms if any
+        for sprite in self.platforms:
+            sprite.kill()
+        
+        # Create platforms from the layout
+        for platform_config in platform_layout:
+            platform_type, x, y, width, height = platform_config
+            platform = Platform(platform_type, x, y, width, height)
+            self.all_sprites.add(platform)
+            self.platforms.add(platform)
 
     def events(self):
         try:
@@ -334,17 +364,37 @@ class LocalGame:
                 if not any(sprite == player_data.get('sprite') for player_data in self.players.values() if 'sprite' in player_data):
                     sprite.update()
                     
-            # Update sprite visuals based on current state
+            # First update sprite physics and state for all player sprites
             for name, player_data in self.players.items():
                 if 'sprite' in player_data:
                     sprite = player_data['sprite']
-                    sprite.update_sprite_image()
+                    # Let the sprite's update method handle physics
+                    sprite.update()
                     
-                    # Ensure player doesn't fall off the bottom
+                    # Update player data from sprite position after physics
+                    player_data['xPos'] = str(sprite.pos.x)
+                    player_data['yPos'] = str(sprite.pos.y)
+                    
+                    # Ensure player doesn't fall off the bottom of the screen
                     if float(player_data['yPos']) > 700:
-                        player_data['yPos'] = '30'
-                        sprite.pos[1] = 30
+                        print(f"Player {name} fell off bottom, respawning...")
+                        # Respawn at top center with no velocity
+                        sprite.pos.x = GAME_WIDTH / 2
+                        sprite.pos.y = 100
+                        sprite.vel = vec(0, 0)
+                        player_data['xPos'] = str(sprite.pos.x)
+                        player_data['yPos'] = str(sprite.pos.y)
                         
+                        # Add damage when falling off
+                        current_health = float(player_data['health'])
+                        new_health = max(0, current_health - 10)  # 10 damage for falling
+                        player_data['health'] = str(new_health)
+                        sprite.health = new_health
+                    
+            # Check winner after all updates
+            if self.initialized and self.playing:
+                self.checkWinner()
+                
         except Exception as e:
             print(f"Error in update: {e}")
             import traceback
@@ -606,6 +656,16 @@ class LocalGame:
             # Create a dictionary to store the sprites by player name for easier reference
             player_sprites = {}
             
+            # Character factory dictionary
+            character_classes = {
+                MARIO: LocalMario,
+                LUIGI: LocalLuigi,
+                YOSHI: LocalYoshi,
+                POPO: LocalPopo,
+                NANA: LocalNana,
+                LINK: LocalLink
+            }
+            
             for name, player_data in self.players.items():
                 char = player_data['character']
                 x = float(player_data['xPos'])
@@ -619,22 +679,12 @@ class LocalGame:
                 player = None
                 # Create the appropriate character using our local character classes
                 try:
-                    if char == MARIO:
-                        player = LocalMario(self, name, 'alive', h, pos, d, w, m)
-                    elif char == LUIGI:
-                        player = LocalLuigi(self, name, 'alive', h, pos, d, w, m)
-                    elif char == YOSHI:
-                        player = LocalYoshi(self, name, 'alive', h, pos, d, w, m)
-                    elif char == POPO:
-                        player = LocalPopo(self, name, 'alive', h, pos, d, w, m)
-                    elif char == NANA:
-                        player = LocalNana(self, name, 'alive', h, pos, d, w, m)
-                    elif char == LINK:
-                        player = LocalLink(self, name, 'alive', h, pos, d, w, m)
-                    else:
-                        # Default to Mario if character not found
+                    # Use factory pattern to get the right character class
+                    character_class = character_classes.get(char, LocalMario)
+                    player = character_class(self, name, 'alive', h, pos, d, w, m)
+                    
+                    if char not in character_classes:
                         print(f"Character {char} not found, defaulting to Mario")
-                        player = LocalMario(self, name, 'alive', h, pos, d, w, m)
                 
                 except Exception as char_error:
                     print(f"Error creating character {char}: {char_error}")
@@ -725,8 +775,40 @@ class LocalGame:
             
             # Update sprite state if it exists
             if 'sprite' in target:
-                target['sprite'].health = new_health
-                target['sprite'].move = move
+                sprite = target['sprite']
+                # Save current position and velocity
+                current_pos = sprite.pos
+                current_vel = sprite.vel
+                
+                # Update sprite state
+                sprite.health = new_health
+                sprite.move = move
+                
+                # Start damage animation lock
+                sprite.animation_locked = True
+                sprite.animation_lock_timer = 0
+                sprite.animation_lock_duration = 15  # 15 frames of hit stun
+                
+                # Apply knockback based on damage (slight vertical boost)
+                knockback = min(damage * 0.5, 10)  # Cap knockback
+                
+                # Apply knockback in the opposite direction of the attacker
+                if attacker and 'sprite' in self.players[attacker]:
+                    attacker_sprite = self.players[attacker]['sprite']
+                    # Determine knockback direction based on attacker's position
+                    if attacker_sprite.pos.x < sprite.pos.x:
+                        # Knock to the right
+                        sprite.vel.x = knockback
+                    else:
+                        # Knock to the left
+                        sprite.vel.x = -knockback
+                    
+                    # Add slight upward bounce
+                    sprite.vel.y = -knockback * 0.5
+                
+                # Update player data to match sprite
+                target['xPos'] = str(sprite.pos.x)
+                target['yPos'] = str(sprite.pos.y)
     
     def restartGame(self):
         # Reset player states from initial state
