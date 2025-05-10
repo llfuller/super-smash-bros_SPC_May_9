@@ -6,10 +6,10 @@ Modified version (for South Coast Plaza Hackathon) of the project based on the C
 * Francheska Marie Pelaez Semilla
 * Shane Carla Serrano
 
-* Modified by:
-Lawson Fuller
-Bo Huang
-Nihal Nihalani
+Modified by:
+* Lawson Fuller
+* Bo Huang
+* Nihal Nihalani
 
 ## Play!
 
