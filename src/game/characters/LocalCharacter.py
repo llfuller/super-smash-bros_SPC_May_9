@@ -217,16 +217,16 @@ class LocalYoshi(LocalCharacter):
 class LocalPopo(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
         # Popo only has 3 movement sprites
-        walkR = [poS1, poM1, poM2, poM3]
-        walkL = [pg.transform.flip(image, True, False) for image in walkR]
-        standR = poS1
-        standL = pg.transform.flip(standR, True, False)
-        weakR = poW1
-        weakL = pg.transform.flip(weakR, True, False)
-        heavyR = poH1
-        heavyL = pg.transform.flip(heavyR, True, False)
-        damagedR = poD1
-        damagedL = pg.transform.flip(damagedR, True, False)
+        walkL = [poS1, poM1, poM2, poM3]
+        walkR = [pg.transform.flip(image, True, False) for image in walkL]
+        standL = poS1
+        standR = pg.transform.flip(standL, True, False)
+        weakL = poW1
+        weakR = pg.transform.flip(weakL, True, False)
+        heavyL = poH1
+        heavyR = pg.transform.flip(heavyL, True, False)
+        damagedL = poD1
+        damagedR = pg.transform.flip(damagedL, True, False)
         
         super().__init__(
             game, name, status, health, pos, direc, walk_c, move,
@@ -240,16 +240,16 @@ class LocalPopo(LocalCharacter):
 class LocalNana(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
         # Nana only has 3 movement sprites
-        walkR = [naS1, naM1, naM2, naM3]
-        walkL = [pg.transform.flip(image, True, False) for image in walkR]
-        standR = naS1
-        standL = pg.transform.flip(standR, True, False)
-        weakR = naW1
-        weakL = pg.transform.flip(weakR, True, False)
-        heavyR = naH1
-        heavyL = pg.transform.flip(heavyR, True, False)
-        damagedR = naD1
-        damagedL = pg.transform.flip(damagedR, True, False)
+        walkL = [naS1, naM1, naM2, naM3]
+        walkR = [pg.transform.flip(image, True, False) for image in walkL]
+        standL = naS1
+        standR = pg.transform.flip(standL, True, False)
+        weakL = naW1
+        weakR = pg.transform.flip(weakL, True, False)
+        heavyL = naH1
+        heavyR = pg.transform.flip(heavyL, True, False)
+        damagedL = naD1
+        damagedR = pg.transform.flip(damagedL, True, False)
         
         super().__init__(
             game, name, status, health, pos, direc, walk_c, move,
