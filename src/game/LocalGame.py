@@ -14,13 +14,11 @@ import json
 import copy
 import random
 
-# characters
-from characters.Mario import Mario
-from characters.Luigi import Luigi
-from characters.Yoshi import Yoshi
-from characters.Popo import Popo
-from characters.Nana import Nana
-from characters.Link import Link
+# Import our custom local character classes
+from characters.LocalCharacter import (
+    LocalMario, LocalLuigi, LocalYoshi, 
+    LocalPopo, LocalNana, LocalLink
+)
 
 # menus
 from menus.Intro import Intro
@@ -45,6 +43,96 @@ print('- Z: Weak attack                  - G: Weak attack')
 print('- X: Heavy attack                 - H: Heavy attack')
 print()
 print('UPDATES (errors will show up here if ever):')
+
+# Controller class to abstract keyboard input
+class KeyboardController:
+    def __init__(self, up_key, left_key, right_key, weak_key, heavy_key, player_name):
+        self.up_key = up_key
+        self.left_key = left_key
+        self.right_key = right_key
+        self.weak_key = weak_key
+        self.heavy_key = heavy_key
+        self.player_name = player_name
+    
+    def check_attack_key(self, event, game):
+        """Check if attack keys were pressed and perform the corresponding action"""
+        if event.type == pg.KEYDOWN:
+            # Weak attack
+            if event.key == self.weak_key:
+                if self.player_name in game.players and 'sprite' in game.players[self.player_name]:
+                    game.players[self.player_name]['sprite'].weakAttack()
+                    return True
+            
+            # Heavy attack
+            elif event.key == self.heavy_key:
+                if self.player_name in game.players and 'sprite' in game.players[self.player_name]:
+                    game.players[self.player_name]['sprite'].heavyAttack()
+                    return True
+        
+        return False
+    
+    def handle_movement(self, keys, game):
+        """Handle movement controls for the player"""
+        if self.player_name not in game.players or 'sprite' not in game.players[self.player_name]:
+            return
+            
+        if float(game.players[self.player_name]['health']) <= 0 or not game.playing:
+            return
+            
+        player_data = game.players[self.player_name]
+        sprite = player_data['sprite']
+        
+        # Reset movement state
+        sprite.acc = pg.math.Vector2(0, 0.5)  # Reset acceleration but keep gravity
+        sprite.move = STAND
+        
+        # Jump
+        if keys[self.up_key]:
+            sprite.jump()
+            sprite.walk_c = 0
+        
+        # Move left
+        if keys[self.left_key] and float(player_data['xPos']) > 40:
+            sprite.acc.x = -sprite.acce
+            sprite.walk_c = (sprite.walk_c + 1) % 8
+            sprite.direc = LEFT
+            sprite.move = WALK
+            player_data['direc'] = LEFT
+            player_data['move'] = WALK
+            player_data['walk_c'] = str(sprite.walk_c)
+        
+        # Move right
+        elif keys[self.right_key] and float(player_data['xPos']) < GAME_WIDTH-40:
+            sprite.acc.x = sprite.acce
+            sprite.walk_c = (sprite.walk_c + 1) % 8
+            sprite.direc = RIGHT
+            sprite.move = WALK
+            player_data['direc'] = RIGHT
+            player_data['move'] = WALK
+            player_data['walk_c'] = str(sprite.walk_c)
+        
+        # If not moving horizontally, make sure walk count is reset
+        else:
+            sprite.walk_c = 0
+            
+        # Update physics
+        sprite.acc.x += sprite.vel.x * FRIC
+        sprite.vel += sprite.acc
+        sprite.pos += sprite.vel + 0.5 * sprite.acc
+        
+        # Update player data from sprite
+        player_data['xPos'] = str(sprite.pos[0])
+        player_data['yPos'] = str(sprite.pos[1])
+        
+        # Update collision rectangle and handle platform collisions 
+        sprite.rect = sprite.image.get_rect()
+        sprite.rect.midbottom = sprite.pos
+        
+        if sprite.vel.y > 0:
+            collision = pg.sprite.spritecollide(sprite, game.platforms, False)
+            if collision:
+                sprite.pos[1] = collision[0].rect.top + 1
+                sprite.vel[1] = 0
 
 class LocalGame:
     # ========================= IMPORTANT METHODS =========================
@@ -97,6 +185,24 @@ class LocalGame:
         
         # Auto player 2 setup
         self.auto_player2 = True  # Flag to enable/disable auto-setup of player 2
+        
+        # Setup controllers
+        self.controllers = {}
+        # Controllers will be fully initialized after player names are set
+
+    def _setup_controllers(self):
+        """Initialize controllers with player names after they are defined"""
+        if self.player_names[0]:
+            # Player 1: Arrow keys and Z/X for attacks
+            self.controllers[self.player_names[0]] = KeyboardController(
+                pg.K_UP, pg.K_LEFT, pg.K_RIGHT, pg.K_z, pg.K_x, self.player_names[0]
+            )
+        
+        if self.player_names[1]:
+            # Player 2: WASD and G/H for attacks
+            self.controllers[self.player_names[1]] = KeyboardController(
+                pg.K_w, pg.K_a, pg.K_d, pg.K_g, pg.K_h, self.player_names[1]
+            )
 
     def run(self):
         # check for the current menu depending on the status
@@ -118,7 +224,6 @@ class LocalGame:
 
                 if self.initialized and self.playing:
                     self.checkWinner()
-                    self.updateAllPlayers()
                     
                 self.clock.tick(FPS)
                 self.events()
@@ -168,27 +273,17 @@ class LocalGame:
                     pg.quit()
                     quit()
 
-                # attacks for player 1 (arrow keys + Z/X)
-                if event.type == pg.KEYDOWN:
-                    if event.key == pg.K_z:
-                        if self.player_names[0] in self.players and 'sprite' in self.players[self.player_names[0]]:
-                            self.players[self.player_names[0]]['sprite'].weakAttack()
-                    
-                    elif event.key == pg.K_x:
-                        if self.player_names[0] in self.players and 'sprite' in self.players[self.player_names[0]]:
-                            self.players[self.player_names[0]]['sprite'].heavyAttack()
-                    
-                    # attacks for player 2 (WASD + G/H)
-                    elif event.key == pg.K_g:
-                        if self.player_names[1] in self.players and 'sprite' in self.players[self.player_names[1]]:
-                            self.players[self.player_names[1]]['sprite'].weakAttack()
-                    
-                    elif event.key == pg.K_h:
-                        if self.player_names[1] in self.players and 'sprite' in self.players[self.player_names[1]]:
-                            self.players[self.player_names[1]]['sprite'].heavyAttack()
-                    
+                # Handle all controllers for attack inputs
+                handled_attack = False
+                for controller in self.controllers.values():
+                    if controller.check_attack_key(event, self):
+                        handled_attack = True
+                        break
+                
+                # If the event wasn't handled as an attack, check other game controls
+                if not handled_attack and event.type == pg.KEYDOWN:
                     # restart game after match ends
-                    elif event.key == pg.K_r:
+                    if event.key == pg.K_r:
                         if self.showed_end:
                             if not self.restart_request:
                                 self.restartGame()
@@ -208,98 +303,38 @@ class LocalGame:
                             pg.quit()
                             quit()
 
-            # Handle player 1 movement (arrow keys)
-            if self.player_names[0] in self.players and 'sprite' in self.players[self.player_names[0]] and self.players[self.player_names[0]]['health'] > 0 and self.playing:
-                player1 = self.players[self.player_names[0]]
-                sprite1 = player1['sprite']
+            # Handle movement for all players using their respective controllers
+            for controller in self.controllers.values():
+                controller.handle_movement(keys, self)
                 
-                # Reset movement state
-                sprite1.move = STAND
-                
-                if keys[pg.K_UP]:
-                    sprite1.jump()
-                    sprite1.walk_c = 0
-
-                if keys[pg.K_LEFT] and float(player1['xPos']) > 40:
-                    sprite1.acc.x = -sprite1.acce
-                    sprite1.walk_c = (sprite1.walk_c + 1) % 8
-                    sprite1.direc = LEFT
-                    sprite1.move = WALK
-                    player1['direc'] = LEFT
-                    player1['move'] = WALK
-                    player1['walk_c'] = str(sprite1.walk_c)
-
-                elif keys[pg.K_RIGHT] and float(player1['xPos']) < GAME_WIDTH-40:
-                    sprite1.acc.x = sprite1.acce
-                    sprite1.walk_c = (sprite1.walk_c + 1) % 8
-                    sprite1.direc = RIGHT
-                    sprite1.move = WALK
-                    player1['direc'] = RIGHT
-                    player1['move'] = WALK
-                    player1['walk_c'] = str(sprite1.walk_c)
-                
-                else:
-                    sprite1.walk_c = 0
-                    sprite1.move = STAND
-                    player1['move'] = STAND
-                    player1['walk_c'] = '0'
-            
-            # Handle player 2 movement (WASD)
-            if self.player_names[1] in self.players and 'sprite' in self.players[self.player_names[1]] and self.players[self.player_names[1]]['health'] > 0 and self.playing:
-                player2 = self.players[self.player_names[1]]
-                sprite2 = player2['sprite']
-                
-                # Reset movement state
-                sprite2.move = STAND
-                
-                if keys[pg.K_w]:
-                    sprite2.jump()
-                    sprite2.walk_c = 0
-
-                if keys[pg.K_a] and float(player2['xPos']) > 40:
-                    sprite2.acc.x = -sprite2.acce
-                    sprite2.walk_c = (sprite2.walk_c + 1) % 8
-                    sprite2.direc = LEFT
-                    sprite2.move = WALK
-                    player2['direc'] = LEFT
-                    player2['move'] = WALK
-                    player2['walk_c'] = str(sprite2.walk_c)
-
-                elif keys[pg.K_d] and float(player2['xPos']) < GAME_WIDTH-40:
-                    sprite2.acc.x = sprite2.acce
-                    sprite2.walk_c = (sprite2.walk_c + 1) % 8
-                    sprite2.direc = RIGHT
-                    sprite2.move = WALK
-                    player2['direc'] = RIGHT
-                    player2['move'] = WALK
-                    player2['walk_c'] = str(sprite2.walk_c)
-                
-                else:
-                    sprite2.walk_c = 0
-                    sprite2.move = STAND
-                    player2['move'] = STAND
-                    player2['walk_c'] = '0'
         except Exception as e:
             print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()  # Print full stack trace for better debugging
             quit()
 
     def update(self):
         try:
-            self.all_sprites.update()
-            
-            # Update player positions in the local server state
+            # Update all non-player sprites
+            for sprite in self.all_sprites:
+                if not any(sprite == player_data.get('sprite') for player_data in self.players.values() if 'sprite' in player_data):
+                    sprite.update()
+                    
+            # Update sprite visuals based on current state
             for name, player_data in self.players.items():
                 if 'sprite' in player_data:
                     sprite = player_data['sprite']
-                    player_data['xPos'] = str(sprite.pos[0])
-                    player_data['yPos'] = str(sprite.pos[1])
+                    sprite.update_sprite_image()
                     
                     # Ensure player doesn't fall off the bottom
                     if float(player_data['yPos']) > 700:
                         player_data['yPos'] = '30'
                         sprite.pos[1] = 30
+                        
         except Exception as e:
             print(f"Error in update: {e}")
+            import traceback
+            traceback.print_exc()
             quit()
 
     # for consistently drawing the background and the sprites
@@ -425,6 +460,9 @@ class LocalGame:
         # Update player count
         self.player_count = 2
         
+        # Set up the controller for player 2
+        self._setup_controllers()
+        
         print(f"Auto-setup Player 2: {player2_name} with character {player2_char}")
         
         # Return so the startGame can be called
@@ -451,6 +489,9 @@ class LocalGame:
             # Move to next player if first player is set
             if self.current_player_index == 0:
                 self.current_player_index = 1
+                
+            # Setup controller for this player
+            self._setup_controllers()
     
     def checkName(self, name):
         # In local mode, just check if the name is already used by the other player
@@ -469,6 +510,12 @@ class LocalGame:
         if old_name in self.players:
             self.players[new_name] = self.players.pop(old_name)
             self.players[new_name]['name'] = new_name
+            
+            # Update in controllers if needed
+            if old_name in self.controllers:
+                controller = self.controllers.pop(old_name)
+                controller.player_name = new_name
+                self.controllers[new_name] = controller
     
     def editPlayerCharacter(self, name, character):
         # Set character in players dict
@@ -541,52 +588,54 @@ class LocalGame:
     
     def createCharacterSprites(self):
         # Create sprites for both players
-        for name, player_data in self.players.items():
-            char = player_data['character']
-            x = float(player_data['xPos'])
-            y = float(player_data['yPos'])
-            d = player_data['direc']
-            h = float(player_data['health'])
-            w = int(player_data['walk_c'])
-            m = player_data['move']
-            pos = [x, y]
+        try:
+            for name, player_data in self.players.items():
+                char = player_data['character']
+                x = float(player_data['xPos'])
+                y = float(player_data['yPos'])
+                d = player_data['direc']
+                h = float(player_data['health'])
+                w = int(player_data['walk_c'])
+                m = player_data['move']
+                pos = [x, y]
+                
+                # Create the appropriate character using our local character classes
+                if char == MARIO:
+                    player = LocalMario(self, name, 'alive', h, pos, d, w, m)
+                elif char == LUIGI:
+                    player = LocalLuigi(self, name, 'alive', h, pos, d, w, m)
+                elif char == YOSHI:
+                    player = LocalYoshi(self, name, 'alive', h, pos, d, w, m)
+                elif char == POPO:
+                    player = LocalPopo(self, name, 'alive', h, pos, d, w, m)
+                elif char == NANA:
+                    player = LocalNana(self, name, 'alive', h, pos, d, w, m)
+                elif char == LINK:
+                    player = LocalLink(self, name, 'alive', h, pos, d, w, m)
+                
+                # Store the sprite reference
+                player_data['sprite'] = player
+                
+                # Add to sprite groups
+                self.all_sprites.add(player)
             
-            # Set as current player for character creation (compatibility with character classes)
-            self.curr_player = name
-            
-            # Create the appropriate character
-            if char == MARIO:
-                player = Mario(self, self.curr_player, name, 'alive', h, pos, d, w, m)
-            elif char == LUIGI:
-                player = Luigi(self, self.curr_player, name, 'alive', h, pos, d, w, m)
-            elif char == YOSHI:
-                player = Yoshi(self, self.curr_player, name, 'alive', h, pos, d, w, m)
-            elif char == POPO:
-                player = Popo(self, self.curr_player, name, 'alive', h, pos, d, w, m)
-            elif char == NANA:
-                player = Nana(self, self.curr_player, name, 'alive', h, pos, d, w, m)
-            elif char == LINK:
-                player = Link(self, self.curr_player, name, 'alive', h, pos, d, w, m)
-            
-            # Store the sprite reference
-            player_data['sprite'] = player
-            
-            # Add to sprite groups
-            self.all_sprites.add(player)
-            
-            # Set as enemy for the other player
-            for other_name in self.players:
-                if other_name != name:
-                    self.enemy_sprites.add(player)
+            # Set up enemy relationships - each player is an enemy to all other players
+            for player_name, player_data in self.players.items():
+                if 'sprite' not in player_data:
+                    continue
+                    
+                for other_name, other_data in self.players.items():
+                    if player_name != other_name and 'sprite' in other_data:
+                        self.enemy_sprites.add(other_data['sprite'])
+                        
+        except Exception as e:
+            print(f"Error in createCharacterSprites: {e}")
+            import traceback
+            traceback.print_exc()  # Print full stack trace for better debugging
     
     def updatePlayer(self):
-        # This is called by character sprites - we need it for compatibility
-        # For the local game, we directly update the player data in the update() method
-        pass
-    
-    def updateAllPlayers(self):
-        # In the network version, this fetches updates from the server
-        # For our local version, we're already updating player states in the update() method
+        # This method exists for compatibility with the character classes
+        # It's not needed in our local implementation
         pass
     
     def checkWinner(self):
@@ -659,6 +708,9 @@ class LocalGame:
         self.current_player_index = 0
         self.player_count = 0
         self.curr_player = ""
+        
+        # Reset controllers
+        self.controllers = {}
         
         # Reset chat area
         self.chat_text = ''
