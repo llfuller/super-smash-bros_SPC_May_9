@@ -1,20 +1,17 @@
 '''
-Local Multiplayer Super Smash Bros Clone
 
-This is a modified version of the original game that supports local multiplayer
-with two controllers on a single instance without requiring a server.
+This is a local version of the Super Smash Bros game that supports two players
+on a single computer without requiring network connectivity.
 
-Controls:
-Player 1 (Keyboard):
-- Arrow keys: Movement
-- Z: Weak attack
-- X: Heavy attack
+The game maintains the same gameplay mechanics and features as the original
+but eliminates the need for a separate server.
 
-Player 2 (Controller):
-- D-pad/Left stick: Movement
-- Button 0/A: Weak attack 
-- Button 1/B: Heavy attack
 '''
+
+import sys
+import pygame as pg
+import json
+import copy
 
 # characters
 from characters.Mario import Mario
@@ -27,291 +24,109 @@ from characters.Link import Link
 # menus
 from menus.Intro import Intro
 from menus.Other import Other
+from menus.Start import Start
 
 # others
 from objects.Platform import Platform
 from settings import *
 from images import *
 
-# dependencies
-import pygame as pg
-import sys
-import json
-import random
-
-class LocalPlayer:
-    def __init__(self, name, character=None, is_ready=False):
-        self.name = name
-        self.character = character
-        self.is_ready = is_ready
-        self.status = 'alive'
-        self.health = 100
-        self.xPos = 0
-        self.yPos = 0
-        self.direc = 'right'
-        self.walk_c = 0
-        self.move = 'stand'
+print()
+print('========== SUPER SMASH BROS - Local Two-Player Edition ==========')
+print('Happy playing! This is the current version and limitations:')
+print('- Once you create a game and enter, you must reset for a new one.')
+print('- No option to recreate a game or to return to the main menu.')
+print('- Game is just an endless loop that detects winner of each round.')
+print()
+print('Player 1 Controls:                Player 2 Controls:')
+print('- Arrow keys: Move                - WASD keys: Move')
+print('- Z: Weak attack                  - G: Weak attack')
+print('- X: Heavy attack                 - H: Heavy attack')
+print()
+print('UPDATES (errors will show up here if ever):')
 
 class LocalGame:
+    # ========================= IMPORTANT METHODS =========================
     def __init__(self):
-        # initialize pygame
+        # initialize
         pg.init()
         pg.mixer.init()
         pg.display.set_caption(TITLE)
         pg.display.set_icon(ICON)
-        
-        # initialize joystick subsystem for controller support
-        pg.joystick.init()
-        self.joysticks = []
-        for i in range(pg.joystick.get_count()):
-            joystick = pg.joystick.Joystick(i)
-            joystick.init()
-            self.joysticks.append(joystick)
-            print(f"Found controller: {joystick.get_name()}")
-        
+
         # game variables
         self.screen = pg.display.set_mode(BG_SIZE)
         self.clock = pg.time.Clock()
         self.status = INTRO
-        self.running = True
-        self.playing = False
-        self.showed_end = False
-        self.initialized = False
-        self.winner = ''
+        self.running = True  # game is running
+        self.playing = False  # player is inside the arena
+        self.showed_end = False  # checks if end game results have been showed
+        self.initialized = False  # initialized game in arena (with players)
+        self.restart_request = False  # checks if player requested for a restart
         
+        # player variables
+        self.player_names = ["", ""]  # player1, player2
+        self.player_characters = ["none", "none"]  # character selections
+        self.player_statuses = ["unready", "unready"]  # ready status
+        self.current_player_index = 0  # which player is currently selecting (0 or 1)
+        self.player_count = 0  # number of ready players
+        self.name_available = True  # for compatibility with menu code
+
         # converted background images for optimized game loop
         self.arena_bg = ARENA_BG.convert()
         self.chat_bg = CHAT_BG.convert()
-        
-        # local players
-        self.players = {}
-        self.char_selection_index = 0
-        self.player_setup_state = 0  # 0: player 1 selection, 1: player 2 selection, 2: ready
-        self.player_characters = [MARIO, LUIGI, YOSHI, POPO, NANA, LINK]
-        self.player1 = LocalPlayer("Player 1")
-        self.player2 = LocalPlayer("Player 2")
 
-        # sprite groups
+        # chat-like message system (no actual networking)
+        self.chat_text = ''
+        self.chatting = False
+        self.chat_once = False
+        self.chat_init = False
+        self.chat_messages = []
+
+        # local server state
+        self.players = {}  # equivalent to server's player dictionary
+        self.init_players = {}  # for game restart
+        self.winner = ""
+        
+        # Required for menu compatibility
+        self.curr_player = ""  # updated during character selection
+
+    def run(self):
+        # check for the current menu depending on the status
+        while True:
+            if self.status == INTRO:
+                Intro(self)
+
+            elif self.status == START:
+                Start(self)
+
+            elif self.status == GUIDE:
+                Other(self, GUIDE, GUIDE_BG)
+
+            elif self.status == ABOUT:
+                Other(self, ABOUT, ABOUT_BG)
+
+            elif self.status == GAME:
+                self.winner = ''
+
+                if self.initialized and self.playing:
+                    self.checkWinner()
+                    self.updateAllPlayers()
+                    
+                self.clock.tick(FPS)
+                self.events()
+                self.update()
+                self.draw()
+            
+    def new(self):
+        # the players will be added after starting the game
         self.enemy_sprites = pg.sprite.Group()
         self.all_sprites = pg.sprite.Group()
         self.platforms = pg.sprite.Group()
-        
-        # messages
-        self.messages = []
 
-    def run(self):
-        while self.running:
-            if self.status == INTRO:
-                self.handle_intro()
-            elif self.status == GUIDE:
-                Other(self, GUIDE, GUIDE_BG)
-            elif self.status == ABOUT:
-                Other(self, ABOUT, ABOUT_BG)
-            elif self.status == START:
-                self.handle_character_selection()
-            elif self.status == GAME:
-                self.game_loop()
-    
-    def handle_intro(self):
-        # Simple intro screen
-        running = True
-        while running and self.running:
-            self.clock.tick(FPS)
-            
-            for event in pg.event.get():
-                if event.type == pg.QUIT:
-                    self.running = False
-                    running = False
-                    pg.quit()
-                    sys.exit()
-                
-                if event.type == pg.KEYDOWN:
-                    if event.key == pg.K_RETURN:
-                        self.status = START
-                        running = False
-                    elif event.key == pg.K_g:
-                        self.status = GUIDE
-                        running = False
-                    elif event.key == pg.K_a:
-                        self.status = ABOUT
-                        running = False
-                    elif event.key == pg.K_ESCAPE:
-                        self.running = False
-                        running = False
-                        pg.quit()
-                        sys.exit()
-            
-            # Draw intro screen
-            self.screen.blit(INTRO_BG, (0, 0))
-            font = pg.font.Font(None, 40)
-            title = font.render("SUPER SMASH BROS - LOCAL", True, WHITE)
-            start = font.render("Press ENTER to Start", True, WHITE)
-            guide = font.render("Press G for Guide", True, WHITE)
-            about = font.render("Press A for About", True, WHITE)
-            quit_text = font.render("Press ESC to Quit", True, WHITE)
-            
-            self.screen.blit(title, (FULL_WIDTH//2 - title.get_width()//2, 100))
-            self.screen.blit(start, (FULL_WIDTH//2 - start.get_width()//2, 300))
-            self.screen.blit(guide, (FULL_WIDTH//2 - guide.get_width()//2, 350))
-            self.screen.blit(about, (FULL_WIDTH//2 - about.get_width()//2, 400))
-            self.screen.blit(quit_text, (FULL_WIDTH//2 - quit_text.get_width()//2, 450))
-            
-            pg.display.flip()
-    
-    def handle_character_selection(self):
-        running = True
-        
-        # Character images for selection screen
-        char_images = {
-            MARIO: maS1,
-            LUIGI: luS1, 
-            YOSHI: yoS1,
-            POPO: poS1,
-            NANA: naS1,
-            LINK: liS1
-        }
-        
-        current_player = self.player1 if self.player_setup_state == 0 else self.player2
-        selection_index = 0
-        
-        while running and self.running:
-            self.clock.tick(FPS)
-            
-            for event in pg.event.get():
-                if event.type == pg.QUIT:
-                    self.running = False
-                    running = False
-                    pg.quit()
-                    sys.exit()
-                
-                # Keyboard controls for selection
-                if event.type == pg.KEYDOWN:
-                    if event.key == pg.K_LEFT:
-                        selection_index = (selection_index - 1) % len(self.player_characters)
-                    elif event.key == pg.K_RIGHT:
-                        selection_index = (selection_index + 1) % len(self.player_characters)
-                    elif event.key == pg.K_RETURN:
-                        selected_char = self.player_characters[selection_index]
-                        current_player.character = selected_char
-                        current_player.is_ready = True
-                        
-                        if self.player_setup_state == 0:
-                            self.player_setup_state = 1
-                            current_player = self.player2
-                            selection_index = 0
-                        else:
-                            # Both players have selected their characters
-                            self.start_game()
-                            running = False
-                
-                # Controller input for player 2
-                if self.player_setup_state == 1 and len(self.joysticks) > 0:
-                    if event.type == pg.JOYBUTTONDOWN:
-                        if event.button == 0:  # A button
-                            selected_char = self.player_characters[selection_index]
-                            current_player.character = selected_char
-                            current_player.is_ready = True
-                            self.start_game()
-                            running = False
-                    
-                    # Handle joystick axis for d-pad/analog movement
-                    if event.type == pg.JOYAXISMOTION:
-                        if event.axis == 0:  # X axis
-                            if event.value > 0.5:  # Right
-                                selection_index = (selection_index + 1) % len(self.player_characters)
-                            elif event.value < -0.5:  # Left
-                                selection_index = (selection_index - 1) % len(self.player_characters)
-                    
-                    # Handle hat (d-pad) movement for selection
-                    if event.type == pg.JOYHATMOTION:
-                        hat_x, hat_y = event.value
-                        if hat_x == 1:  # Right
-                            selection_index = (selection_index + 1) % len(self.player_characters)
-                        elif hat_x == -1:  # Left
-                            selection_index = (selection_index - 1) % len(self.player_characters)
-            
-            # Draw character selection screen
-            self.screen.fill(BLACK)
-            
-            # Draw title
-            font = pg.font.Font(None, 40)
-            if self.player_setup_state == 0:
-                title = font.render("Player 1 - Choose your character", True, WHITE)
-            else:
-                title = font.render("Player 2 - Choose your character", True, WHITE)
-            
-            self.screen.blit(title, (FULL_WIDTH//2 - title.get_width()//2, 100))
-            
-            # Draw character options
-            char_name = self.player_characters[selection_index]
-            char_img = char_images[char_name]
-            
-            # Make larger display
-            scaled_img = pg.transform.scale(char_img, (200, 200))
-            self.screen.blit(scaled_img, (FULL_WIDTH//2 - 100, 200))
-            
-            char_name_text = font.render(char_name, True, WHITE)
-            self.screen.blit(char_name_text, (FULL_WIDTH//2 - char_name_text.get_width()//2, 420))
-            
-            # Navigation instructions
-            nav_font = pg.font.Font(None, 30)
-            if self.player_setup_state == 0:
-                nav_text = nav_font.render("Use LEFT/RIGHT arrows to select, ENTER to confirm", True, WHITE)
-            else:
-                if len(self.joysticks) > 0:
-                    nav_text = nav_font.render("Use D-pad/Left stick to select, A to confirm", True, WHITE)
-                else:
-                    nav_text = nav_font.render("Use LEFT/RIGHT arrows to select, ENTER to confirm", True, WHITE)
-            
-            self.screen.blit(nav_text, (FULL_WIDTH//2 - nav_text.get_width()//2, 500))
-            
-            pg.display.flip()
-    
-    def start_game(self):
         self.loadPlatforms()
-        
-        # Set player positions
-        self.player1.xPos = 200
-        self.player1.yPos = HEIGHT - 100
-        self.player2.xPos = 500
-        self.player2.yPos = HEIGHT - 100
-        
-        # Create player characters
-        self.create_player_character(self.player1, "p1")
-        self.create_player_character(self.player2, "p2")
-        
-        self.status = GAME
-        self.initialized = True
-        self.playing = True
-        self.messages.append("============ GAME START ============")
-        self.messages.append("Best of luck - may the best player win!")
-    
-    def create_player_character(self, player_data, player_id):
-        pos = [player_data.xPos, player_data.yPos]
-        char = player_data.character
-        
-        if char == MARIO:
-            player = Mario(self, player_id, player_data.name, 'alive', 100, pos, 'right', 0, 'stand')
-        elif char == LUIGI:
-            player = Luigi(self, player_id, player_data.name, 'alive', 100, pos, 'right', 0, 'stand')
-        elif char == YOSHI:
-            player = Yoshi(self, player_id, player_data.name, 'alive', 100, pos, 'right', 0, 'stand')
-        elif char == POPO:
-            player = Popo(self, player_id, player_data.name, 'alive', 100, pos, 'right', 0, 'stand')
-        elif char == NANA:
-            player = Nana(self, player_id, player_data.name, 'alive', 100, pos, 'right', 0, 'stand')
-        elif char == LINK:
-            player = Link(self, player_id, player_data.name, 'alive', 100, pos, 'right', 0, 'stand')
-        
-        self.players[player_id] = player
-        self.all_sprites.add(player)
-        
-        # Add to enemy sprite group for collision detection
-        if player_id == "p1":
-            self.enemy_sprites.add(self.players["p2"])
-        else:
-            self.enemy_sprites.add(self.players["p1"])
-    
+        self.run()
+
     def loadPlatforms(self):
         base = Platform('floor', 0, HEIGHT-30, GAME_WIDTH, 30)
         self.all_sprites.add(base)
@@ -328,153 +143,216 @@ class LocalGame:
         plat3 = Platform('platform', 250, 260, 200, 50)
         self.all_sprites.add(plat3)
         self.platforms.add(plat3)
-    
-    def game_loop(self):
-        while self.running and self.playing:
-            self.clock.tick(FPS)
-            self.handle_events()
-            self.update()
-            self.draw()
-            self.check_winner()
-    
-    def handle_events(self):
-        for event in pg.event.get():
-            if event.type == pg.QUIT:
-                self.playing = False
-                self.running = False
-                pg.quit()
-                sys.exit()
-            
-            # Key presses for player 1 attacks
-            if event.type == pg.KEYDOWN:
-                if event.key == pg.K_z:
-                    if "p1" in self.players:
-                        self.players["p1"].weakAttack()
-                elif event.key == pg.K_x:
-                    if "p1" in self.players:
-                        self.players["p1"].heavyAttack()
-                elif event.key == pg.K_r:
-                    if self.showed_end:
-                        self.restart_game()
-                elif event.key == pg.K_ESCAPE:
-                    self.playing = False
-                    self.status = INTRO
-            
-            # Controller inputs for player 2 attacks
-            if len(self.joysticks) > 0 and event.type == pg.JOYBUTTONDOWN:
-                if event.button == 0:  # A button (weak attack)
-                    if "p2" in self.players:
-                        self.players["p2"].weakAttack()
-                elif event.button == 1:  # B button (heavy attack)
-                    if "p2" in self.players:
-                        self.players["p2"].heavyAttack()
-        
-        # Keyboard controls for player 1 movement
-        keys = pg.key.get_pressed()
-        player1 = self.players.get("p1")
-        
-        if player1 and player1.health > 0:
-            # Jump
-            if keys[pg.K_UP]:
-                player1.jump()
-            
-            # Left movement
-            if keys[pg.K_LEFT] and player1.pos[0] > 40:
-                player1.acc.x = -player1.acce
-                player1.walk_c += 1
-                if player1.walk_c >= 8:
-                    player1.walk_c = 0
-                player1.direc = LEFT
-                player1.move = WALK
-            
-            # Right movement
-            elif keys[pg.K_RIGHT] and player1.pos[0] < GAME_WIDTH-40:
-                player1.acc.x = player1.acce
-                player1.walk_c += 1
-                if player1.walk_c >= 8:
-                    player1.walk_c = 0
-                player1.direc = RIGHT
-                player1.move = WALK
-            
-            # Standing
-            else:
-                player1.walk_c = 0
-                player1.move = STAND
-        
-        # Controller input for player 2 movement
-        if len(self.joysticks) > 0:
-            joystick = self.joysticks[0]
-            player2 = self.players.get("p2")
-            
-            if player2 and player2.health > 0:
-                # Check hat (d-pad) for movement
-                hat_x, hat_y = joystick.get_hat(0) if joystick.get_numhats() > 0 else (0, 0)
+
+    def events(self):
+        try:
+            keys = pg.key.get_pressed()
+
+            # once player enters game screen - show initial chat
+            if not self.chat_init:
+                self.chat_text = 'Game started! Good luck!'
+                self.chat_init = True
+
+            for event in pg.event.get():
+                # check for closing window
+                if event.type == pg.QUIT:                    
+                    print("You quit in the middle of the game!")
+                    self.running = False
+                    pg.quit()
+                    quit()
+
+                # attacks for player 1 (arrow keys + Z/X)
+                if event.type == pg.KEYDOWN:
+                    if event.key == pg.K_z:
+                        if self.player_names[0] in self.players:
+                            self.players[self.player_names[0]]['sprite'].weakAttack()
+                    
+                    elif event.key == pg.K_x:
+                        if self.player_names[0] in self.players:
+                            self.players[self.player_names[0]]['sprite'].heavyAttack()
+                    
+                    # attacks for player 2 (WASD + G/H)
+                    elif event.key == pg.K_g:
+                        if self.player_names[1] in self.players:
+                            self.players[self.player_names[1]]['sprite'].weakAttack()
+                    
+                    elif event.key == pg.K_h:
+                        if self.player_names[1] in self.players:
+                            self.players[self.player_names[1]]['sprite'].heavyAttack()
+                    
+                    # restart game after match ends
+                    elif event.key == pg.K_r:
+                        if self.showed_end:
+                            if not self.restart_request:
+                                self.restartGame()
+                                self.restart_request = True
+                                self.chat_messages.append('Game restarted!')
+                    
+                    # return to main menu
+                    elif event.key == pg.K_m:
+                        if self.showed_end:
+                            self.quitToMainMenu()
+                    
+                    # quit game
+                    elif event.key == pg.K_q:
+                        if self.showed_end:
+                            print("Thank you for playing!")
+                            self.running = False
+                            pg.quit()
+                            quit()
+
+            # Handle player 1 movement (arrow keys)
+            if self.player_names[0] in self.players and self.players[self.player_names[0]]['health'] > 0 and self.playing:
+                player1 = self.players[self.player_names[0]]
+                sprite1 = player1['sprite']
                 
-                # Jump (up on d-pad or left stick)
-                if hat_y == 1 or joystick.get_axis(1) < -0.5:
-                    player2.jump()
+                # Reset movement state
+                sprite1.move = STAND
                 
-                # Left movement
-                if (hat_x == -1 or joystick.get_axis(0) < -0.5) and player2.pos[0] > 40:
-                    player2.acc.x = -player2.acce
-                    player2.walk_c += 1
-                    if player2.walk_c >= 8:
-                        player2.walk_c = 0
-                    player2.direc = LEFT
-                    player2.move = WALK
+                if keys[pg.K_UP]:
+                    sprite1.jump()
+                    sprite1.walk_c = 0
+
+                if keys[pg.K_LEFT] and float(player1['xPos']) > 40:
+                    sprite1.acc.x = -sprite1.acce
+                    sprite1.walk_c = (sprite1.walk_c + 1) % 8
+                    sprite1.direc = LEFT
+                    sprite1.move = WALK
+                    player1['direc'] = LEFT
+                    player1['move'] = WALK
+                    player1['walk_c'] = str(sprite1.walk_c)
+
+                elif keys[pg.K_RIGHT] and float(player1['xPos']) < GAME_WIDTH-40:
+                    sprite1.acc.x = sprite1.acce
+                    sprite1.walk_c = (sprite1.walk_c + 1) % 8
+                    sprite1.direc = RIGHT
+                    sprite1.move = WALK
+                    player1['direc'] = RIGHT
+                    player1['move'] = WALK
+                    player1['walk_c'] = str(sprite1.walk_c)
                 
-                # Right movement
-                elif (hat_x == 1 or joystick.get_axis(0) > 0.5) and player2.pos[0] < GAME_WIDTH-40:
-                    player2.acc.x = player2.acce
-                    player2.walk_c += 1
-                    if player2.walk_c >= 8:
-                        player2.walk_c = 0
-                    player2.direc = RIGHT
-                    player2.move = WALK
-                
-                # Standing
                 else:
-                    player2.walk_c = 0
-                    player2.move = STAND
-    
+                    sprite1.walk_c = 0
+                    sprite1.move = STAND
+                    player1['move'] = STAND
+                    player1['walk_c'] = '0'
+            
+            # Handle player 2 movement (WASD)
+            if self.player_names[1] in self.players and self.players[self.player_names[1]]['health'] > 0 and self.playing:
+                player2 = self.players[self.player_names[1]]
+                sprite2 = player2['sprite']
+                
+                # Reset movement state
+                sprite2.move = STAND
+                
+                if keys[pg.K_w]:
+                    sprite2.jump()
+                    sprite2.walk_c = 0
+
+                if keys[pg.K_a] and float(player2['xPos']) > 40:
+                    sprite2.acc.x = -sprite2.acce
+                    sprite2.walk_c = (sprite2.walk_c + 1) % 8
+                    sprite2.direc = LEFT
+                    sprite2.move = WALK
+                    player2['direc'] = LEFT
+                    player2['move'] = WALK
+                    player2['walk_c'] = str(sprite2.walk_c)
+
+                elif keys[pg.K_d] and float(player2['xPos']) < GAME_WIDTH-40:
+                    sprite2.acc.x = sprite2.acce
+                    sprite2.walk_c = (sprite2.walk_c + 1) % 8
+                    sprite2.direc = RIGHT
+                    sprite2.move = WALK
+                    player2['direc'] = RIGHT
+                    player2['move'] = WALK
+                    player2['walk_c'] = str(sprite2.walk_c)
+                
+                else:
+                    sprite2.walk_c = 0
+                    sprite2.move = STAND
+                    player2['move'] = STAND
+                    player2['walk_c'] = '0'
+        except Exception as e:
+            print(f"Error: {e}")
+            quit()
+
     def update(self):
-        self.all_sprites.update()
-    
+        try:
+            self.all_sprites.update()
+            
+            # Update player positions in the local server state
+            for name, player_data in self.players.items():
+                if 'sprite' in player_data:
+                    sprite = player_data['sprite']
+                    player_data['xPos'] = str(sprite.pos[0])
+                    player_data['yPos'] = str(sprite.pos[1])
+                    
+                    # Ensure player doesn't fall off the bottom
+                    if float(player_data['yPos']) > 700:
+                        player_data['yPos'] = '30'
+                        sprite.pos[1] = 30
+        except Exception as e:
+            print(f"Error in update: {e}")
+            quit()
+
+    # for consistently drawing the background and the sprites
     def draw(self):
-        # Draw the background and screen elements
-        self.screen.blit(self.arena_bg, ORIGIN)
-        self.screen.blit(self.chat_bg, (700,0))
-        
-        # Draw stats board
-        self.draw_stats_board()
-        
-        # Draw all sprites
-        self.all_sprites.draw(self.screen)
-        
-        # Draw player names
-        font = pg.font.Font(None, 20)
-        for player in self.players.values():
-            coors = (player.rect.left, player.rect.top-15)
-            text_surface = font.render((player.name), True, WHITE)
-            self.screen.blit(text_surface, coors)
-        
-        # Draw messages
-        font2 = pg.font.Font(None, 24)
-        for i in range(min(len(self.messages), 10)):
-            text_surface2 = font2.render(self.messages[i], True, BLACK)
-            self.screen.blit(text_surface2, (730, 95+(i*25)))
-        
-        # Draw end game results
-        if self.winner and not self.showed_end:
-            self.messages = []
-            self.messages.append(f"===== {self.winner} won this round! =====")
-            self.messages.append("-> Press R to restart the game")
-            self.messages.append("-> Press ESC to return to the main menu")
-            self.showed_end = True
-        
-        pg.display.flip()
-    
-    def draw_stats_board(self):
+        try:
+            # show the background
+            self.screen.blit(self.arena_bg, ORIGIN)
+            self.screen.blit(self.chat_bg, (700,0))
+            
+            # check method below
+            self.drawStatsBoard()
+            
+            # show all the sprites
+            self.all_sprites.draw(self.screen)
+
+            # write the player's name on top of the sprite
+            font = pg.font.Font(None, 20)
+            for player_data in self.players.values():
+                if 'sprite' in player_data:
+                    sprite = player_data['sprite']
+                    coors = (sprite.rect.left, sprite.rect.top-15)
+                    text_surface = font.render(sprite.name, True, WHITE)
+                    self.screen.blit(text_surface, coors)
+
+            # show end game results
+            if len(self.winner) > 0 and not self.showed_end:
+                self.initialized = False
+                self.playing = False
+
+                self.chat_messages = []
+                self.chat_messages.append('===== {} won this round! ====='.format(self.winner))
+                self.chat_messages.append("-> Press R to restart the game")
+                self.chat_messages.append('')
+                self.chat_messages.append('-> Press M to go back to the main menu')
+                self.chat_messages.append('')
+                self.chat_messages.append('-> Press Q to exit the game')
+                self.chat_messages.append('   * We hope you enjoyed playing!')
+                self.chat_messages.append('======================================')
+
+                self.showed_end = True
+
+            # show the message area
+            font = pg.font.Font(None, 30)
+            text_surface = font.render(self.chat_text, True, WHITE)
+            self.screen.blit(text_surface, (760,644))
+
+            # show all the messages
+            font2 = pg.font.Font(None, 24)
+            for i in range(0,len(self.chat_messages)):
+                text_surface2 = font2.render(self.chat_messages[i], True, BLACK)
+                self.screen.blit(text_surface2, (730,95+(i*25)))
+
+            pg.display.flip()
+            
+        except Exception as e:
+            print(f"Error in draw: {e}")
+            quit()
+
+    # board with the players' name and life
+    def drawStatsBoard(self):
         font = pg.font.Font(None, 22)
         text = font.render('Player - Life', True, WHITE)
         pg.draw.rect(self.screen, BLACK, (10, 10, 140, 20))
@@ -482,86 +360,267 @@ class LocalGame:
         self.screen.blit(text, (37,12))
 
         i = 0        
-        for player in self.players.values():
-            name = player.name
-            stats = name + ' - ' + str(int(player.health))
-            diff = 10 - len(player.name)
+        for player_data in self.players.values():
+            name = player_data.get('name', 'Unknown')
+            health = float(player_data.get('health', 0))
+            stats = name + ' - ' + str(int(health))
+            diff = 10 - len(name)
 
             # color text according to player's health
-            if player.health > 60:
+            if health > 60:
                 text = font.render(stats, True, GREEN)
-            elif player.health <= 60 and player.health > 20:
+            elif health <= 60 and health > 20:
                 text = font.render(stats, True, ORANGE) 
-            elif player.health <= 20 and player.health > 0:
+            elif health <= 20 and health > 0:
                 text = font.render(stats, True, RED)
-            elif player.health == 0:
+            elif health == 0:
                 text = font.render(stats, True, BLACK)
 
             self.screen.blit(text, (12+(diff*5),40+(i*30)))
             i += 1
+
+    # ========================= LOCAL SERVER METHODS =========================
     
-    def check_winner(self):
-        if not self.playing:
-            return
+    # Menu interface compatibility methods
+    def connectPlayer(self, name):
+        if self.current_player_index < 2:
+            self.player_names[self.current_player_index] = name
             
-        # Check if any player has 0 health
-        p1 = self.players.get("p1")
-        p2 = self.players.get("p2")
-        
-        if p1 and p2:
-            if p1.health <= 0:
-                self.winner = p2.name
-                self.playing = False
-            elif p2.health <= 0:
-                self.winner = p1.name
-                self.playing = False
+            # Add to players dict (emulating server behavior)
+            self.players[name] = {
+                'name': name,
+                'character': 'none',
+                'status': 'unready',
+                'health': '100',
+                'xPos': '0',
+                'yPos': '0',
+                'direc': 'right',
+                'walk_c': '0',
+                'move': 'stand'
+            }
+            
+            # Move to next player if first player is set
+            if self.current_player_index == 0:
+                self.current_player_index = 1
     
-    def restart_game(self):
-        # Reset player health and positions
-        self.player1.health = 100
-        self.player1.xPos = 200
-        self.player1.yPos = HEIGHT - 100
+    def checkName(self, name):
+        # In local mode, just check if the name is already used by the other player
+        if self.current_player_index == 1 and name == self.player_names[0]:
+            self.name_available = False
+        else:
+            self.name_available = True
+    
+    def editPlayerName(self, old_name, new_name):
+        # Update name in player list
+        if old_name in self.player_names:
+            index = self.player_names.index(old_name)
+            self.player_names[index] = new_name
         
-        self.player2.health = 100
-        self.player2.xPos = 500
-        self.player2.yPos = HEIGHT - 100
+        # Update in players dict
+        if old_name in self.players:
+            self.players[new_name] = self.players.pop(old_name)
+            self.players[new_name]['name'] = new_name
+    
+    def editPlayerCharacter(self, name, character):
+        # Set character in players dict
+        if name in self.players:
+            self.players[name]['character'] = character
+            
+            # For tracking in our local player state
+            if name == self.player_names[0]:
+                self.player_characters[0] = character
+            elif name == self.player_names[1]:
+                self.player_characters[1] = character
+    
+    def editPlayerStatus(self, name, status):
+        # Update status in players dict
+        if name in self.players:
+            self.players[name]['status'] = status
+            
+            # For tracking in our local player state
+            if name == self.player_names[0]:
+                self.player_statuses[0] = status
+            elif name == self.player_names[1]:
+                self.player_statuses[1] = status
+            
+            # Count ready players
+            self.player_count = 0
+            for player_status in self.player_statuses:
+                if player_status == 'ready':
+                    self.player_count += 1
+    
+    def startGame(self):
+        # Only start if both players are ready
+        if self.player_statuses[0] == 'ready' and self.player_statuses[1] == 'ready':
+            print("====== Started Game! ======")
+            
+            # Position players
+            # Player 1
+            self.players[self.player_names[0]]['xPos'] = '157'
+            self.players[self.player_names[0]]['yPos'] = '480'
+            self.players[self.player_names[0]]['direc'] = 'right'
+            
+            # Player 2
+            self.players[self.player_names[1]]['xPos'] = '534'
+            self.players[self.player_names[1]]['yPos'] = '480'
+            self.players[self.player_names[1]]['direc'] = 'left'
+            
+            # Create copy for restart
+            self.init_players = copy.deepcopy(self.players)
+            
+            # Create the actual character sprites
+            self.createCharacterSprites()
+            
+            # Set game state
+            self.status = GAME
+            self.playing = True
+            self.initialized = True
+            
+            # Game start message
+            self.chat_messages.append('============ GAME START ============')
+            self.chat_messages.append('Best of luck - may the best player win!')
+            self.chat_messages.append('======================================')
+    
+    def createCharacterSprites(self):
+        # Create sprites for both players
+        for name, player_data in self.players.items():
+            char = player_data['character']
+            x = float(player_data['xPos'])
+            y = float(player_data['yPos'])
+            d = player_data['direc']
+            h = float(player_data['health'])
+            w = int(player_data['walk_c'])
+            m = player_data['move']
+            pos = [x, y]
+            
+            # Set as current player for character creation (compatibility with character classes)
+            self.curr_player = name
+            
+            # Create the appropriate character
+            if char == MARIO:
+                player = Mario(self, self.curr_player, name, 'alive', h, pos, d, w, m)
+            elif char == LUIGI:
+                player = Luigi(self, self.curr_player, name, 'alive', h, pos, d, w, m)
+            elif char == YOSHI:
+                player = Yoshi(self, self.curr_player, name, 'alive', h, pos, d, w, m)
+            elif char == POPO:
+                player = Popo(self, self.curr_player, name, 'alive', h, pos, d, w, m)
+            elif char == NANA:
+                player = Nana(self, self.curr_player, name, 'alive', h, pos, d, w, m)
+            elif char == LINK:
+                player = Link(self, self.curr_player, name, 'alive', h, pos, d, w, m)
+            
+            # Store the sprite reference
+            player_data['sprite'] = player
+            
+            # Add to sprite groups
+            self.all_sprites.add(player)
+            
+            # Set as enemy for the other player
+            for other_name in self.players:
+                if other_name != name:
+                    self.enemy_sprites.add(player)
+    
+    def updatePlayer(self):
+        # This is called by character sprites - we need it for compatibility
+        # For the local game, we directly update the player data in the update() method
+        pass
+    
+    def updateAllPlayers(self):
+        # In the network version, this fetches updates from the server
+        # For our local version, we're already updating player states in the update() method
+        pass
+    
+    def checkWinner(self):
+        # Check if there's a winner (one player with health > 0)
+        alive_count = len(self.players)
+        alive = ''
         
-        # Clear sprite groups
-        self.enemy_sprites.empty()
-        self.all_sprites.empty()
-        self.platforms.empty()
+        for name, player_data in self.players.items():
+            if float(player_data['health']) == 0:
+                alive_count -= 1
+            else:
+                alive = name
         
-        # Reload platforms and players
+        # If only one player is alive, they win
+        if alive_count <= 1 and alive:
+            self.winner = alive
+    
+    def attackPlayer(self, player_name, damage, move):
+        # Process attack on a player
+        if player_name in self.players:
+            target = self.players[player_name]
+            current_health = float(target['health'])
+            new_health = max(0, current_health - float(damage))
+            target['health'] = str(new_health)
+            target['move'] = move
+            
+            # Update sprite state if it exists
+            if 'sprite' in target:
+                target['sprite'].health = new_health
+                target['sprite'].move = move
+    
+    def restartGame(self):
+        # Reset player states from initial state
+        self.players = copy.deepcopy(self.init_players)
+        
+        # Reset sprite groups
+        self.enemy_sprites = pg.sprite.Group()
+        self.all_sprites = pg.sprite.Group()
+        self.platforms = pg.sprite.Group()
         self.loadPlatforms()
-        self.create_player_character(self.player1, "p1")
-        self.create_player_character(self.player2, "p2")
+        
+        # Create character sprites with reset values
+        self.createCharacterSprites()
         
         # Reset game state
         self.showed_end = False
-        self.winner = ''
+        self.restart_request = False
+        self.status = GAME
         self.playing = True
-        self.messages = []
-        self.messages.append("=========== GAME RESTART ===========")
-        self.messages.append("Best of luck - may the best player win!")
+        self.initialized = True
+        
+        # Game restart message
+        self.chat_messages = []
+        self.chat_messages.append('=========== GAME RESTART ===========')
+        self.chat_messages.append('Best of luck - may the best player win!')
+        self.chat_messages.append('======================================')
     
-    # Required by character classes for compatibility
-    def updatePlayer(self):
-        pass
-    
-    def attackPlayer(self, player_name, damage, move):
-        # Handle attack locally
-        if player_name == "p1":
-            self.players["p1"].health -= damage
-            self.players["p1"].move = move
-            if self.players["p1"].health < 0:
-                self.players["p1"].health = 0
-        elif player_name == "p2":
-            self.players["p2"].health -= damage
-            self.players["p2"].move = move
-            if self.players["p2"].health < 0:
-                self.players["p2"].health = 0
+    def quitToMainMenu(self):
+        # Reset game state
+        self.status = INTRO
+        self.playing = False
+        self.showed_end = False
+        self.initialized = False
+        self.restart_request = False
+        
+        # Reset player variables
+        self.player_names = ["", ""]
+        self.player_characters = ["none", "none"]
+        self.player_statuses = ["unready", "unready"]
+        self.current_player_index = 0
+        self.player_count = 0
+        self.curr_player = ""
+        
+        # Reset chat area
+        self.chat_text = ''
+        self.chatting = False
+        self.chat_once = False
+        self.chat_init = False
+        self.chat_messages = []
+        
+        # Reset player state
+        self.players = {}
+        self.init_players = {}
+        
+        # Reset sprite groups
+        self.enemy_sprites = pg.sprite.Group()
+        self.all_sprites = pg.sprite.Group()
+        self.platforms = pg.sprite.Group()
+        self.loadPlatforms()
 
-# Main entry point
-if __name__ == "__main__":
-    game = LocalGame()
-    game.run() 
+# main start of the program
+game = LocalGame()
+
+while game.running:
+    game.new()
