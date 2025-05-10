@@ -9,6 +9,7 @@ from objects.ReadyButton import ReadyButton
 from settings import *
 from images import *
 from Chat import Chat
+from sound_manager import sound_manager
 
 class Start:
     def __init__(self, game):
@@ -91,6 +92,9 @@ class Start:
                 # mouse click
                 if event.type == pg.MOUSEBUTTONDOWN:
                     if back.isOver(pos) and not player_ready: 
+                        # Play select sound
+                        sound_manager.play_ui_sound('select')
+                        
                         if screen == 'name':
                             self.g.status = INTRO
                             if enteredName:
@@ -101,32 +105,50 @@ class Start:
                                 self.g.disconnectPlayer(self.g.curr_player, self.g.restart_request)
                         elif screen == 'character':
                             screen = 'name'
+                            # Switch back to menu music
+                            sound_manager.play_background_music('menu')
                         elif screen == 'waiting':
                             screen = 'character'
+                            # Switch to character select music
+                            sound_manager.play_background_music('character_select')
 
                     if screen == 'character':
                         if mario.isOver(pos, 'mario'):
+                            # Play select sound
+                            sound_manager.play_ui_sound('select_alt')
                             self.g.editPlayerCharacter(self.g.curr_player, MARIO)
                             screen = 'waiting'
                         elif luigi.isOver(pos, 'luigi'):
+                            # Play select sound
+                            sound_manager.play_ui_sound('select_alt')
                             self.g.editPlayerCharacter(self.g.curr_player, LUIGI)
                             screen = 'waiting'
                         elif yoshi.isOver(pos, 'yoshi'):
+                            # Play select sound
+                            sound_manager.play_ui_sound('select_alt')
                             self.g.editPlayerCharacter(self.g.curr_player, YOSHI)
                             screen = 'waiting'
                         elif popo.isOver(pos, 'popo'):
+                            # Play select sound
+                            sound_manager.play_ui_sound('select_alt')
                             self.g.editPlayerCharacter(self.g.curr_player, POPO)
                             screen = 'waiting'
                         elif nana.isOver(pos, 'nana'):
+                            # Play select sound
+                            sound_manager.play_ui_sound('select_alt')
                             self.g.editPlayerCharacter(self.g.curr_player, NANA)
                             screen = 'waiting'
                         elif link.isOver(pos, 'link'):
+                            # Play select sound
+                            sound_manager.play_ui_sound('select_alt')
                             self.g.editPlayerCharacter(self.g.curr_player, LINK)
                             screen = 'waiting'
 
                     if screen == 'waiting':
                         if not player_ready:
                             if ready.isOver(pos):
+                                # Play ready sound
+                                sound_manager.play_ui_sound('select_alt2')
                                 self.g.editPlayerStatus(self.g.curr_player, 'ready')
                                 player_ready = True
                                 ready.click()
@@ -135,19 +157,30 @@ class Start:
                 if event.type == pg.MOUSEMOTION:
                     back.isOver(pos)
                     if screen == 'character':
-                        mario.isOver(pos, 'mario')
-                        luigi.isOver(pos, 'luigi')
-                        yoshi.isOver(pos, 'yoshi')
-                        popo.isOver(pos, 'popo')
-                        nana.isOver(pos, 'nana')
-                        link.isOver(pos, 'link')
+                        # Check for hover state changes on character buttons
+                        if mario.isOver(pos, 'mario') and not mario.is_highlighted:
+                            sound_manager.play_ui_sound('select')
+                        if luigi.isOver(pos, 'luigi') and not luigi.is_highlighted:
+                            sound_manager.play_ui_sound('select')
+                        if yoshi.isOver(pos, 'yoshi') and not yoshi.is_highlighted:
+                            sound_manager.play_ui_sound('select')
+                        if popo.isOver(pos, 'popo') and not popo.is_highlighted:
+                            sound_manager.play_ui_sound('select')
+                        if nana.isOver(pos, 'nana') and not nana.is_highlighted:
+                            sound_manager.play_ui_sound('select')
+                        if link.isOver(pos, 'link') and not link.is_highlighted:
+                            sound_manager.play_ui_sound('select')
                     if screen == 'waiting':
                         if not player_ready:
-                            ready.isOver(pos)
+                            if ready.isOver(pos) and not ready.is_highlighted:
+                                sound_manager.play_ui_sound('select')
 
                 if event.type == pg.KEYDOWN:
                     if screen == 'name' or screen == 'no_name' or screen == 'waiting':
                         if event.key == pg.K_RETURN:
+                            # Play selection sound
+                            sound_manager.play_ui_sound('select')
+                            
                             if screen != 'waiting':
                                 if len(self.g.curr_player) == 0:
                                     screen = 'no_name'
@@ -155,6 +188,9 @@ class Start:
                                 else:
                                     if self.g.name_available or self.g.curr_player == old_name:
                                         screen = 'character'
+                                        # Play character select music
+                                        sound_manager.play_background_music('character_select')
+                                        
                                         if not enteredName:
                                             # if not entered yet - connect once
                                             enteredName = True
@@ -175,11 +211,17 @@ class Start:
                             # limit character length for the screen
                             if len(self.g.curr_player) < 10:
                                 char = event.unicode
+                                if char.isalnum() or char == ' ':
+                                    # Play typing sound
+                                    sound_manager.play_ui_sound('select')
                                 self.g.curr_player += char
             
             if screen == 'name' or screen == 'no_name':
                 keys = pg.key.get_pressed()
                 if keys[pg.K_BACKSPACE]:
+                    if len(self.g.curr_player) > 0:
+                        # Play backspace sound
+                        sound_manager.play_ui_sound('select')
                     self.g.curr_player = self.g.curr_player[:-1]
 
             if screen == 'character':

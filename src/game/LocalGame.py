@@ -35,6 +35,8 @@ from config import PRO_CONTROLLER, DEFAULT_SETTINGS  # Import Pro Controller con
 from input_handler import input_handler, INTENTS  # Import unified input handler
 from player_controller import PlayerController  # Import the player controller
 from entities.entities import EntitySystem  # Import our entity system
+from sound_player import SoundPlayer  # Import sound player
+from sound_manager import sound_manager  # Import sound manager
 
 # Add missing color
 YELLOW = (255, 255, 0)
@@ -64,7 +66,15 @@ class LocalGame:
     def __init__(self):
         # initialize
         pg.init()
-        pg.mixer.init()
+        
+        # Initialize mixer with better settings for MP3 support if not already initialized
+        if not pg.mixer.get_init():
+            try:
+                pg.mixer.init(44100, -16, 2, 2048)  # CD quality audio (44.1kHz, 16-bit, stereo, 2048 buffer)
+                print("Pygame mixer initialized for MP3 and WAV playback")
+            except pg.error as e:
+                print(f"Warning: pygame mixer initialization failed: {e}")
+        
         pg.display.set_caption(TITLE)
         pg.display.set_icon(ICON)
 
@@ -162,6 +172,9 @@ class LocalGame:
             else:
                 print("No controllers found. Using keyboard controls only.")
                 self.settings['use_controller'] = False
+        
+        # Start menu background music
+        sound_manager.play_background_music('menu')
 
     def _setup_controllers(self):
         """Initialize controllers with player names after they are defined"""
@@ -699,6 +712,14 @@ class LocalGame:
                 self.initialized = False
                 self.playing = False
 
+                # Get the character of the winner
+                winner_character = None
+                if self.winner in self.players and 'character' in self.players[self.winner]:
+                    winner_character = self.players[self.winner]['character']
+                
+                # Play victory music for the winning character
+                sound_manager.play_victory_music(winner_character)
+                
                 self.chat_messages = []
                 self.chat_messages.append('===== {} won this round! ====='.format(self.winner))
                 self.chat_messages.append("-> Press R to restart the game")
@@ -914,7 +935,16 @@ class LocalGame:
             "message": "Match started!"
         })
         
-        print("====== Started Game! ======")
+        # Play start sound
+        sound_manager.play_ui_sound('start')
+        
+        # Stop menu music and start battle music
+        # Select a random stage name for music variety
+        stage_names = list(sound_manager.STAGE_MUSIC.keys())
+        selected_stage = random.choice(stage_names)
+        sound_manager.play_background_music('battle', stage=selected_stage)
+        
+        print(f"====== Started Game! Playing {selected_stage} stage music ======")
         
         # Position players
         # Player 1 
@@ -1121,16 +1151,27 @@ class LocalGame:
         
         # If only one player is alive, they win
         if alive_count <= 1 and alive:
-            self.winner = alive
-            
-            # Record KO event
-            if defeated_player:
-                self.record_event("KO", f"{alive} knocked out {defeated_player}! GAME!", "Critical")
+            # If we already have a winner, don't set it again
+            if not self.winner:
+                self.winner = alive
                 
-            # Save match events to log file
-            if not self.match_saved:
-                self.save_match_events()
-                self.match_saved = True
+                # Play victory music for the winning character
+                if alive in self.players and 'character' in self.players[alive]:
+                    character_type = self.players[alive]['character']
+                    # Play character-specific victory music
+                    sound_manager.play_victory_music(character_type)
+                else:
+                    # Play default victory music
+                    sound_manager.play_victory_music()
+                
+                # Record KO event
+                if defeated_player:
+                    self.record_event("KO", f"{alive} knocked out {defeated_player}! GAME!", "Critical")
+                    
+                # Save match events to log file
+                if not self.match_saved:
+                    self.save_match_events()
+                    self.match_saved = True
     
     def attackPlayer(self, player_name, damage, move, attacker_pos_x):
         # Process attack on a player
@@ -1169,11 +1210,17 @@ class LocalGame:
                                     sprite.move = STAND
                                     print(f"{player_name}'s shield broke!")
                                     
+                                    # Play shield break sound
+                                    sound_manager.play_shield_sound('break')
+                                    
                                     # Record shield break event
                                     self.record_event("SHIELD_BREAK", f"{player_name}'s shield shattered under pressure!", "High")
                             
                             # No damage or knockback when shielded
                             print(f"{player_name} blocked {damage}% damage with shield")
+                            
+                            # Play shield hit sound
+                            sound_manager.play_shield_sound('hit')
                             
                             # Record shield block event for big hits
                             if damage >= 15:
@@ -1183,6 +1230,17 @@ class LocalGame:
                     
                     # Get previous damage before hit
                     prev_damage = sprite.damage_percent
+                    
+                    # Play hit sound based on damage amount
+                    sound_manager.play_damage_sound(damage)
+                    
+                    # Play character-specific hit sound if available
+                    if 'character' in player_data:
+                        character_type = player_data['character']
+                        if damage >= 15:
+                            sound_manager.play_character_sound(character_type, 'attack_heavy')
+                        else:
+                            sound_manager.play_character_sound(character_type, 'attack_weak')
                     
                     # Determine knockback values based on damage amount from attacker
                     # (This is handled inside the sprite's take_damage method)
@@ -1274,6 +1332,16 @@ class LocalGame:
         # Reset match saved flag
         self.match_saved = False
         
+        # Reset winner
+        self.winner = ""
+        
+        # Play the battle music again - choose a different stage for variety
+        stage_names = list(sound_manager.STAGE_MUSIC.keys())
+        selected_stage = random.choice(stage_names)
+        sound_manager.play_background_music('battle', stage=selected_stage)
+        
+        print(f"====== Restarted Game! Playing {selected_stage} stage music ======")
+        
         # Game restart message
         self.chat_messages = []
         self.chat_messages.append('=========== GAME RESTART ===========')
@@ -1315,6 +1383,12 @@ class LocalGame:
         self.all_sprites = pg.sprite.Group()
         self.platforms = pg.sprite.Group()
         self.loadPlatforms()
+        
+        # Reset winner
+        self.winner = ""
+        
+        # Switch back to menu music
+        sound_manager.play_background_music('menu')
 
     def drawShieldDebugInfo(self):
         """Draw debug information about shield state for each player"""

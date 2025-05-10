@@ -12,6 +12,15 @@ import os
 import pygame as pg
 import time
 from sound_player import SoundPlayer  # Import the SoundPlayer class
+from sound_manager import sound_manager  # Import the sound manager
+
+# Initialize pygame and mixer for better MP3 support
+if not pg.mixer.get_init():
+    try:
+        pg.mixer.init(44100, -16, 2, 2048)  # CD quality audio (44.1kHz, 16-bit, stereo, 2048 buffer)
+        print("Pygame mixer initialized for MP3 and WAV playback")
+    except pg.error as e:
+        print(f"Warning: pygame mixer initialization failed: {e}")
 
 # Simply use the current directory as the game directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -37,7 +46,7 @@ print("=== Super Smash Bros - Local Two-Player Edition Launcher ===")
 print()
 
 # Play startup sound
-SoundPlayer.play_sound("Select")
+sound_manager.play_ui_sound('select')
 
 # Display GIANT MODE status
 from settings import GIANT_MODE_ENABLED
