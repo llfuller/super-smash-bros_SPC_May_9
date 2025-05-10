@@ -14,7 +14,7 @@ import json
 import copy
 import random
 
-# Import our custom local character classes
+# Fix import paths to use direct imports since we're in the game directory
 from characters.LocalCharacter import (
     LocalMario, LocalLuigi, LocalYoshi, 
     LocalPopo, LocalNana, LocalLink

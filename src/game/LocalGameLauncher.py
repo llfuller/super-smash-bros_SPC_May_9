@@ -8,15 +8,11 @@ a separate server or network connection.
 import sys
 import os
 
-# Add the src directory to the Python path to allow imports from the game modules
+# Simply use the current directory as the game directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
-src_dir = os.path.join(current_dir, 'src')
-if src_dir not in sys.path:
-    sys.path.insert(0, src_dir)
 
-# Set the working directory to the src/game path for proper asset loading
-game_dir = os.path.join(src_dir, 'game')
-os.chdir(game_dir)
+# Just make sure we're in the game directory (already are, but to be safe)
+os.chdir(current_dir)
 
 print("=== Super Smash Bros - Local Two-Player Edition Launcher ===")
 print()
@@ -33,8 +29,8 @@ print("- H: Heavy attack")
 print()
 print("Starting the game...")
 
-# Import and run the local game
-from game.LocalGame import LocalGame
+# Since we're already in the game directory, import directly
+from LocalGame import LocalGame
 
 game = LocalGame()
 game.new() 
