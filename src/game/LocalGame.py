@@ -31,6 +31,12 @@ from settings import *
 from images import *
 from platform_layouts import get_layout  # Import the platform layouts
 
+# Add missing color
+YELLOW = (255, 255, 0)
+
+# Vector utility
+vec = pg.math.Vector2
+
 print()
 print('========== SUPER SMASH BROS - Local Two-Player Edition ==========')
 print('Happy playing! This is the current version and limitations:')
@@ -82,7 +88,7 @@ class KeyboardController:
         sprite = player_data['sprite']
         
         # Don't process movement if player is dead or game is not in play
-        if float(player_data['health']) <= 0 or not game.playing:
+        if sprite.damage_percent >= 999 or not game.playing:
             return
         
         # Reset acceleration but keep gravity
@@ -111,11 +117,29 @@ class KeyboardController:
         is_moving_horizontally = False
         
         # Check for drop-through platform input
+        # Only set the flag when the key is first pressed
+        # Once the drop-through process starts, the character's state will handle continuation
         if keys[self.down_key]:
             # Set a flag on sprite for dropping through platforms
             sprite.drop_through = True
+            
+            # If character is standing on a platform (not a floor), initiate drop-through
+            if not sprite.in_air:
+                # Check what the character is standing on
+                sprite.rect.y += 1  # Move down slightly to check
+                collision = pg.sprite.spritecollide(sprite, game.platforms, False)
+                sprite.rect.y -= 1  # Move back
+                
+                # If standing on a platform, mark it for drop-through
+                for platform in collision:
+                    if platform.type == 'platform':
+                        sprite.dropping_through_platforms.add(platform)
+                        sprite.is_dropping_through = True
         else:
+            # Clear the flag when key is released
             sprite.drop_through = False
+            # Note: The character's update method will handle the rest of the
+            # drop-through logic to continue it even after this flag is cleared
         
         # Jump - check if not in landing lag or other animation lock
         if keys[self.up_key] and not sprite.animation_locked and not sprite.in_air:
@@ -381,15 +405,14 @@ class LocalGame:
                         # Respawn at top center with no velocity
                         sprite.pos.x = GAME_WIDTH / 2
                         sprite.pos.y = 100
-                        sprite.vel = vec(0, 0)
+                        sprite.vel.x = 0
+                        sprite.vel.y = 0
                         player_data['xPos'] = str(sprite.pos.x)
                         player_data['yPos'] = str(sprite.pos.y)
                         
                         # Add damage when falling off
-                        current_health = float(player_data['health'])
-                        new_health = max(0, current_health - 10)  # 10 damage for falling
-                        player_data['health'] = str(new_health)
-                        sprite.health = new_health
+                        sprite.damage_percent += 10  # 10% damage for falling
+                        player_data['damage_percent'] = str(sprite.damage_percent)
                     
             # Check winner after all updates
             if self.initialized and self.playing:
@@ -460,7 +483,7 @@ class LocalGame:
     # board with the players' name and life
     def drawStatsBoard(self):
         font = pg.font.Font(None, 22)
-        text = font.render('Player - Life', True, WHITE)
+        text = font.render('Player - Damage %', True, WHITE)
         pg.draw.rect(self.screen, BLACK, (10, 10, 140, 20))
         pg.draw.rect(self.screen, GRAY, (10, 30, 140, 30*len(self.players)))
         self.screen.blit(text, (37,12))
@@ -468,18 +491,26 @@ class LocalGame:
         i = 0        
         for player_data in self.players.values():
             name = player_data.get('name', 'Unknown')
-            health = float(player_data.get('health', 0))
-            stats = name + ' - ' + str(int(health))
+            
+            # Get damage percentage from sprite or player data
+            if 'sprite' in player_data:
+                damage_percent = player_data['sprite'].damage_percent
+            else:
+                damage_percent = float(player_data.get('damage_percent', 0))
+                
+            stats = name + ' - ' + str(int(damage_percent)) + '%'
             diff = 10 - len(name)
 
-            # color text according to player's health
-            if health > 60:
+            # Color text according to player's damage percentage
+            if damage_percent < 50:
                 text = font.render(stats, True, GREEN)
-            elif health <= 60 and health > 20:
-                text = font.render(stats, True, ORANGE) 
-            elif health <= 20 and health > 0:
+            elif damage_percent < 100:
+                text = font.render(stats, True, YELLOW) 
+            elif damage_percent < 150:
+                text = font.render(stats, True, ORANGE)
+            elif damage_percent < 999:
                 text = font.render(stats, True, RED)
-            elif health == 0:
+            else:  # 999% (defeated)
                 text = font.render(stats, True, BLACK)
 
             self.screen.blit(text, (12+(diff*5),40+(i*30)))
@@ -509,7 +540,7 @@ class LocalGame:
             'name': player2_name,
             'character': player2_char,
             'status': 'ready',  # Auto-ready
-            'health': '100',
+            'damage_percent': '0',  # Start with 0% damage
             'xPos': '0',
             'yPos': '0',
             'direc': 'left',
@@ -542,7 +573,7 @@ class LocalGame:
                 'name': name,
                 'character': 'none',
                 'status': 'unready',
-                'health': '100',
+                'damage_percent': '0',  # Start with 0% damage
                 'xPos': '0',
                 'yPos': '0',
                 'direc': 'right',
@@ -671,7 +702,15 @@ class LocalGame:
                 x = float(player_data['xPos'])
                 y = float(player_data['yPos'])
                 d = player_data['direc']
-                h = float(player_data['health'])
+                
+                # Use damage_percent or default to 0 if not present (for compatibility)
+                damage_percent = 0.0
+                if 'damage_percent' in player_data:
+                    damage_percent = float(player_data['damage_percent'])
+                elif 'health' in player_data:
+                    # Legacy support - convert health to 0 damage
+                    damage_percent = 0.0
+                
                 w = int(player_data['walk_c'])
                 m = player_data['move']
                 pos = [x, y]
@@ -681,7 +720,12 @@ class LocalGame:
                 try:
                     # Use factory pattern to get the right character class
                     character_class = character_classes.get(char, LocalMario)
-                    player = character_class(self, name, 'alive', h, pos, d, w, m)
+                    
+                    # Pass damage_percent as health parameter (for compatibility with existing code)
+                    player = character_class(self, name, 'alive', damage_percent, pos, d, w, m)
+                    
+                    # Debug output
+                    print(f"Created {char} for {name} at position {x}, {y}")
                     
                     if char not in character_classes:
                         print(f"Character {char} not found, defaulting to Mario")
@@ -690,7 +734,7 @@ class LocalGame:
                     print(f"Error creating character {char}: {char_error}")
                     print("Defaulting to Mario")
                     # If creating a specific character fails, default to Mario
-                    player = LocalMario(self, name, 'alive', h, pos, d, w, m)
+                    player = LocalMario(self, name, 'alive', damage_percent, pos, d, w, m)
                 
                 if player:
                     # Store the sprite reference
@@ -741,21 +785,29 @@ class LocalGame:
         pass
     
     def checkWinner(self):
-        # Check if there's a winner (one player with health > 0)
+        # Check if there's a winner (one player with damage < 999%)
         alive_count = len(self.players)
         alive = ''
         
         for name, player_data in self.players.items():
-            if float(player_data['health']) == 0:
-                alive_count -= 1
+            if 'sprite' in player_data:
+                sprite = player_data['sprite']
+                if sprite.is_defeated():
+                    alive_count -= 1
+                else:
+                    alive = name
             else:
-                alive = name
+                # Use player data if sprite not available
+                if float(player_data.get('damage_percent', 0)) >= 999:
+                    alive_count -= 1
+                else:
+                    alive = name
         
         # If only one player is alive, they win
         if alive_count <= 1 and alive:
             self.winner = alive
     
-    def attackPlayer(self, player_name, damage, move):
+    def attackPlayer(self, player_name, damage, move, attacker_pos_x):
         # Process attack on a player
         if player_name in self.players:
             # Debug output
@@ -765,50 +817,18 @@ class LocalGame:
                     attacker = name
                     break
             
-            print(f"Player {attacker} attacks {player_name} for {damage} damage!")
+            print(f"Player {attacker} attacks {player_name} for {damage}% damage!")
             
             target = self.players[player_name]
-            current_health = float(target['health'])
-            new_health = max(0, current_health - float(damage))
-            target['health'] = str(new_health)
-            target['move'] = move
             
-            # Update sprite state if it exists
+            # Update percentage in player data
             if 'sprite' in target:
                 sprite = target['sprite']
-                # Save current position and velocity
-                current_pos = sprite.pos
-                current_vel = sprite.vel
-                
-                # Update sprite state
-                sprite.health = new_health
-                sprite.move = move
-                
-                # Start damage animation lock
-                sprite.animation_locked = True
-                sprite.animation_lock_timer = 0
-                sprite.animation_lock_duration = 15  # 15 frames of hit stun
-                
-                # Apply knockback based on damage (slight vertical boost)
-                knockback = min(damage * 0.5, 10)  # Cap knockback
-                
-                # Apply knockback in the opposite direction of the attacker
-                if attacker and 'sprite' in self.players[attacker]:
-                    attacker_sprite = self.players[attacker]['sprite']
-                    # Determine knockback direction based on attacker's position
-                    if attacker_sprite.pos.x < sprite.pos.x:
-                        # Knock to the right
-                        sprite.vel.x = knockback
-                    else:
-                        # Knock to the left
-                        sprite.vel.x = -knockback
-                    
-                    # Add slight upward bounce
-                    sprite.vel.y = -knockback * 0.5
-                
-                # Update player data to match sprite
-                target['xPos'] = str(sprite.pos.x)
-                target['yPos'] = str(sprite.pos.y)
+                # Apply damage to the sprite
+                new_percent = sprite.take_damage(damage, attacker_pos_x)
+                # Update player data
+                target['damage_percent'] = str(new_percent)
+                target['move'] = move
     
     def restartGame(self):
         # Reset player states from initial state

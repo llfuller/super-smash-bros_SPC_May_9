@@ -18,6 +18,10 @@ MOVEMENT_SPEED_MULTIPLIER = 2.0
 # Jump height adjustment to compensate for larger character size
 JUMP_HEIGHT_FACTOR = 1.0  # Adjust this to control jump height
 
+# Knockback base values
+BASE_KNOCKBACK_X = 3.0  # Base horizontal knockback
+BASE_KNOCKBACK_Y = 2.0  # Base vertical knockback
+
 vec = pg.math.Vector2
 
 # This is a modified base character class that doesn't rely on hardcoded keyboard input
@@ -33,8 +37,8 @@ class LocalCharacter(pg.sprite.Sprite):
         self.name = name
         self.status = status
         
-        # Stats
-        self.health = health
+        # Stats - convert health to damage percentage (starting at 0%)
+        self.damage_percent = 0.0  # Damage percentage (Smash Bros style)
         self.weak = weak_damage
         self.heavy = heavy_damage
         # Double the horizontal acceleration for faster movement
@@ -56,8 +60,8 @@ class LocalCharacter(pg.sprite.Sprite):
         
         # Platform drop-through variables
         self.drop_through = False  # Flag set by controller when down is pressed
-        self.ignore_platform_collision = False  # Flag to ignore platform collisions when dropping through
-        self.platform_drop_cooldown = 0  # Cooldown timer to prevent immediate re-collision
+        self.dropping_through_platforms = set()  # Set of platforms being dropped through
+        self.is_dropping_through = False  # State flag to track a drop-through in progress
         
         # Attack recovery timers (in frames)
         self.weak_attack_recovery = 20
@@ -124,9 +128,48 @@ class LocalCharacter(pg.sprite.Sprite):
             self.vel.y = -VEL * JUMP_HEIGHT_FACTOR
             self.in_air = True
 
+    def take_damage(self, damage, attacker_pos_x):
+        """
+        Apply damage (increases percentage) and calculate knockback based on percentage
+        Returns the new damage percentage
+        """
+        # Increase damage percentage
+        self.damage_percent += damage
+        
+        # Calculate knockback based on damage percentage
+        # Higher percentage = more knockback
+        knockback_multiplier = 1.0 + (self.damage_percent / 100.0)
+        
+        # Determine horizontal knockback direction
+        knockback_direction = 1 if attacker_pos_x < self.pos.x else -1
+        
+        # Apply knockback
+        knockback_x = BASE_KNOCKBACK_X * knockback_multiplier * knockback_direction
+        knockback_y = -BASE_KNOCKBACK_Y * knockback_multiplier  # Negative for upward
+        
+        # Apply to velocity
+        self.vel.x = knockback_x
+        self.vel.y = knockback_y
+        
+        # Enter damage state
+        self.move = DAMAGED
+        
+        # Apply animation lock based on percentage (higher = longer stun)
+        stun_duration = int(self.damage_stun * knockback_multiplier)
+        self.animation_locked = True
+        self.animation_lock_timer = 0
+        self.animation_lock_duration = stun_duration
+        
+        # Set in_air since knockback will launch the player
+        self.in_air = True
+        
+        print(f"{self.name} took {damage}%, now at {self.damage_percent}% with knockback {knockback_x:.2f}, {knockback_y:.2f}")
+        
+        return self.damage_percent
+    
     def weakAttack(self):
         # Only allow attack if not already in an attack animation or damaged
-        if self.animation_locked or self.move in [WEAK_ATTACK, HEAVY_ATTACK, DAMAGED, LANDING] or self.health <= 0:
+        if self.animation_locked or self.move in [WEAK_ATTACK, HEAVY_ATTACK, DAMAGED, LANDING] or self.damage_percent >= 999:
             return
             
         if not self.game.chatting:
@@ -140,19 +183,13 @@ class LocalCharacter(pg.sprite.Sprite):
             enemy_group = getattr(self, 'enemy_sprites', self.game.enemy_sprites)
             collided_enemies = pg.sprite.spritecollide(self, enemy_group, False)
             for enemy in collided_enemies:
-                enemy.health -= self.weak
-                enemy.move = DAMAGED
-                # Start enemy damage animation lock
-                enemy.animation_locked = True
-                enemy.animation_lock_timer = 0
-                enemy.animation_lock_duration = self.damage_stun
-                self.game.attackPlayer(enemy.name, self.weak, DAMAGED)
-                if enemy.health < 0:
-                    enemy.health = 0
+                # Apply damage using percentage system
+                enemy.take_damage(self.weak, self.pos.x)
+                self.game.attackPlayer(enemy.name, self.weak, DAMAGED, self.pos.x)
 
     def heavyAttack(self):
         # Only allow attack if not already in an attack animation or damaged
-        if self.animation_locked or self.move in [WEAK_ATTACK, HEAVY_ATTACK, DAMAGED, LANDING] or self.health <= 0:
+        if self.animation_locked or self.move in [WEAK_ATTACK, HEAVY_ATTACK, DAMAGED, LANDING] or self.damage_percent >= 999:
             return
             
         if not self.game.chatting:
@@ -166,15 +203,9 @@ class LocalCharacter(pg.sprite.Sprite):
             enemy_group = getattr(self, 'enemy_sprites', self.game.enemy_sprites)
             collided_enemies = pg.sprite.spritecollide(self, enemy_group, False)
             for enemy in collided_enemies:
-                enemy.health -= self.heavy
-                enemy.move = DAMAGED
-                # Start enemy damage animation lock
-                enemy.animation_locked = True
-                enemy.animation_lock_timer = 0
-                enemy.animation_lock_duration = self.damage_stun * 1.5
-                self.game.attackPlayer(enemy.name, self.heavy, DAMAGED)
-                if enemy.health < 0:
-                    enemy.health = 0
+                # Apply damage using percentage system
+                enemy.take_damage(self.heavy, self.pos.x)
+                self.game.attackPlayer(enemy.name, self.heavy, DAMAGED, self.pos.x)
     
     def update(self):
         # Handle animation lock timers
@@ -186,57 +217,86 @@ class LocalCharacter(pg.sprite.Sprite):
                 if self.move in [WEAK_ATTACK, HEAVY_ATTACK, DAMAGED, LANDING]:
                     self.move = STAND
         
-        # Handle platform drop-through cooldown
-        if self.platform_drop_cooldown > 0:
-            self.platform_drop_cooldown -= 1
-            # If cooldown expires, stop ignoring platform collisions
-            if self.platform_drop_cooldown <= 0:
-                self.ignore_platform_collision = False
-        
-        # Check if down is pressed while on a platform
-        if self.drop_through and not self.in_air and not self.ignore_platform_collision:
-            # Start ignoring platform collisions
-            self.ignore_platform_collision = True
-            self.platform_drop_cooldown = 10  # Ignore collisions for 10 frames
-            self.in_air = True
-            # Give a little push downward to ensure falling
-            self.vel.y = 1.0
-            print(f"Player {self.name} dropping through platform")
-        
         # Update physics
         self.acc = vec(0, 0.5)  # Gravity
         self.acc.x += self.vel.x * FRIC
         self.vel += self.acc
         self.pos += self.vel + 0.5 * self.acc
 
+        # Update collision rectangle for collision detection
+        self.rect = self.image.get_rect()
+        self.rect.midbottom = self.pos
+
         # Detect landing from air
         was_in_air = self.in_air
-        if self.vel.y > 0:
-            # Only check platform collisions if not ignoring them
-            if not self.ignore_platform_collision:
-                collision = pg.sprite.spritecollide(self, self.game.platforms, False)
-                if collision:
-                    # If we were in the air and now landed
-                    if was_in_air:
-                        self.apply_landing_lag()
-                    
-                    self.pos[1] = collision[0].rect.top + 1
-                    self.vel[1] = 0
-                    self.in_air = False
+        if self.vel.y > 0:  # Falling
+            # Check for platforms
+            collision = pg.sprite.spritecollide(self, self.game.platforms, False)
+            
+            # Clear drop-through for platforms that are no longer in collision
+            if self.dropping_through_platforms:
+                platforms_to_remove = set()
+                for platform in self.dropping_through_platforms:
+                    if platform not in collision:
+                        platforms_to_remove.add(platform)
+                
+                self.dropping_through_platforms -= platforms_to_remove
+                
+                # If no platforms are being dropped through anymore, reset the state
+                if not self.dropping_through_platforms:
+                    self.is_dropping_through = False
+            
+            # Filter platforms:
+            # 1. Always collide with floors
+            # 2. For regular platforms, handle drop-through logic
+            filtered_collision = []
+            for platform in collision:
+                # Check if we can drop through this platform
+                if self.can_drop_through(platform):
+                    # Add the platform to the set being dropped through
+                    self.dropping_through_platforms.add(platform)
+                    # Set the drop-through state to active
+                    self.is_dropping_through = True
+                    # Skip collision with this platform
+                    print(f"Player {self.name} dropping through platform while falling")
+                else:
+                    # Can't drop through, handle normal collision
+                    filtered_collision.append(platform)
+            
+            if filtered_collision:
+                # Landing on a platform or floor
+                if was_in_air:
+                    self.apply_landing_lag()
+                
+                self.pos[1] = filtered_collision[0].rect.top + 1
+                self.vel[1] = 0
+                self.in_air = False
+                
+                # Reset drop-through state when landing
+                self.is_dropping_through = False
+                self.dropping_through_platforms.clear()
             else:
-                # If ignoring platforms, always consider in the air
+                # No valid platforms to land on, remain in the air
                 self.in_air = True
         else:
             # In the air if velocity is upward
             self.in_air = True
+            
+            # Also check if we need to clear drop-through state
+            # This handles the case where the player jumps through a platform
+            collision = pg.sprite.spritecollide(self, self.game.platforms, False)
+            if not collision:
+                # No collision with any platform, clear the drop-through state
+                self.is_dropping_through = False
+                self.dropping_through_platforms.clear()
         
         # Update sprite image based on current state
         self.update_sprite_image()
         
-        # Update collision rectangle
+        # Final update to collision rectangle
         self.rect = self.image.get_rect()
         self.rect.midbottom = self.pos
-
+        
     def apply_landing_lag(self):
         """Apply landing lag based on vertical velocity and other factors"""
         # Calculate landing lag based on fall speed (higher fall = more lag)
@@ -309,12 +369,41 @@ class LocalCharacter(pg.sprite.Sprite):
             elif self.direc == RIGHT:
                 self.image = self.damagedR
 
-        if self.health <= 0:
+        if self.damage_percent >= 999:
             self.image = self.dead_image
 
     def can_move(self):
         """Check if character can be controlled by movement inputs"""
-        return not self.animation_locked and self.health > 0
+        return not self.animation_locked and self.damage_percent < 999
+
+    def is_defeated(self):
+        """Check if character is defeated (999% damage)"""
+        return self.damage_percent >= 999
+
+    def can_drop_through(self, platform):
+        """Check if the platform can be dropped through"""
+        # Floor platforms cannot be dropped through
+        if platform.type == 'floor':
+            return False
+        
+        # If not a valid platform, cannot drop through
+        if platform.type != 'platform':
+            return False
+        
+        # If already dropping through this platform, allow it to continue
+        if platform in self.dropping_through_platforms:
+            return True
+        
+        # If drop-through initiated (down key pressed), allow it
+        if self.drop_through:
+            return True
+        
+        # If in a drop-through state, allow it to continue
+        if self.is_dropping_through:
+            return True
+        
+        # Otherwise, cannot drop through
+        return False
 
 # Create local character versions of each character
 

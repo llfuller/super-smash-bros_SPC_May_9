@@ -16,3 +16,5 @@ class Platform(pg.sprite.Sprite):
         self.y = y
         self.w = w 
         self.h = h
+        # Store platform type for drop-through logic
+        self.type = label  # 'floor' or 'platform'
