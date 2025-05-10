@@ -32,6 +32,7 @@ class CharButton:
         self.y = y
         self.w = w
         self.h = h
+        self.is_highlighted = False
         if label == 'mario':
             self.image = marioa
         elif label == 'luigi':
@@ -51,6 +52,8 @@ class CharButton:
         # pos is the mouse position or a tuple of (x,y) coordinates
         if pos[0] > self.x and pos[0] < self.x + self.w:
             if pos[1] > self.y and pos[1] < self.y + self.h:
+                was_highlighted = self.is_highlighted
+                self.is_highlighted = True
                 if label == 'mario':
                     self.image = mariob
                 elif label == 'luigi':
@@ -65,6 +68,7 @@ class CharButton:
                     self.image = linkb
                 return True
 
+        self.is_highlighted = False
         if label == 'mario':
             self.image = marioa
         elif label == 'luigi':

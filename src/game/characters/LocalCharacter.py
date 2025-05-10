@@ -8,6 +8,8 @@ from settings import *  # Import all settings including GIANT_MODE_ENABLED and G
 from images import *
 from characters.MeleePhysics import MeleePhysicsMixin  # Import the mixin
 from melee_physics import KNOCKBACK_EXAMPLES, calculate_knockback, calculate_hitstun, knockback_to_velocity  # Import needed constants
+# Import sound manager
+from sound_manager import sound_manager
 
 # Add new animation state
 LANDING = 'landing'
@@ -259,13 +261,27 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             print(f"{self.name} can't jump because already in air")
             return False
         
+        # Character type detection for playing the right sound
+        character_type = self.__class__.__name__.replace('Local', '')
+        
         # Apply different upward impulse based on jump type
         if is_short_hop:
             self.vel.y = -10  # Reduced velocity for short hop
             print(f"{self.name} short hopped with velocity {self.vel.y}")
+            
+            # Play short hop sound
+            sound_manager.play_jump_sound(character=character_type, jump_type='short_hop')
         else:
             self.vel.y = -16  # Full jump velocity
             print(f"{self.name} full jumped with velocity {self.vel.y}")
+            
+            # Play jump sound based on character type
+            if 'Samus' in self.__class__.__name__:
+                # Samus has a special high jump sound
+                sound_manager.play_jump_sound(character='Samus', jump_type='high_jump')
+            else:
+                # Standard jump sound
+                sound_manager.play_jump_sound(character=character_type, jump_type='standard')
             
         self.in_air = True
         self.is_jumping = True
@@ -284,7 +300,10 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             # If shield is active, don't take damage
             if self.shield_active and not self.shield_broken:
                 # Reduce shield health based on damage
-                self.shield_health -= damage * 2  # Shield depletes faster than normal
+                self.shield_health -= damage * 2  # Shield depletes faster
+                
+                # Play shield hit sound
+                sound_manager.play_shield_sound('hit')
                 
                 # Check if shield broke
                 if self.shield_health <= 0:
@@ -294,6 +313,9 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
                     self.shield_cooldown = 120  # 2 seconds cooldown (60 FPS)
                     # Add shield break effect/animation here if desired
                     print(f"{self.name}'s shield broke!")
+                    
+                    # Play shield break sound
+                    sound_manager.play_shield_sound('break')
                 
                 # No damage taken, return current damage
                 return self.damage_percent
@@ -359,6 +381,15 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             self.animation_lock_duration = self.weak_attack_recovery
             self.move = WEAK_ATTACK
             
+            # Get character type for sound effects
+            character_type = self.__class__.__name__.replace('Local', '')
+            
+            # Play weak attack sound with character voice
+            sound_manager.play_attack_sound('weak', character_type)
+            
+            # Try to play character-specific attack sound if available
+            sound_manager.play_character_sound(character_type, 'attack_weak')
+            
             # Check collision with enemies
             enemy_group = getattr(self, 'enemy_sprites', self.game.enemy_sprites)
             collided_enemies = pg.sprite.spritecollide(self, enemy_group, False)
@@ -378,6 +409,15 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             self.animation_lock_timer = 0
             self.animation_lock_duration = self.heavy_attack_recovery
             self.move = HEAVY_ATTACK
+            
+            # Get character type for sound effects
+            character_type = self.__class__.__name__.replace('Local', '')
+            
+            # Play heavy attack sound with character voice
+            sound_manager.play_attack_sound('heavy', character_type)
+            
+            # Try to play character-specific attack sound if available
+            sound_manager.play_character_sound(character_type, 'attack_heavy')
             
             # Check collision with enemies
             enemy_group = getattr(self, 'enemy_sprites', self.game.enemy_sprites)
@@ -923,6 +963,10 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             if not self.shield_active:
                 # Print debug message when shield activates
                 print(f"{self.name}'s shield activated")
+                
+                # Play shield on sound
+                sound_manager.play_shield_sound('on')
+                
             self.shield_active = True
             self.move = SHIELD
             
@@ -946,6 +990,10 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         if self.shield_active:
             # Print debug message when shield deactivates
             print(f"{self.name}'s shield deactivated")
+            
+            # Play shield off sound
+            sound_manager.play_shield_sound('off')
+            
         self.shield_active = False
         if self.move == SHIELD:
             self.move = STAND
@@ -973,6 +1021,12 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             
             # Increase damage percentage
             self.damage_percent += damage
+            
+            # Get character type for sound effects
+            character_type = self.__class__.__name__.replace('Local', '')
+            
+            # Play damage sound with character voice
+            sound_manager.play_damage_sound(damage, character_type)
             
             # Calculate knockback
             if 'calculate_knockback' in globals():
