@@ -20,6 +20,9 @@ INTENTS = {
     'WEAK_ATTACK': 'weak_attack',
     'HEAVY_ATTACK': 'heavy_attack',
     
+    # Defensive intent
+    'SHIELD': 'shield',         # Create a shield to block damage
+    
     # Game control intents
     'MENU': 'menu',
     'RESTART': 'restart',
@@ -320,6 +323,10 @@ class InputHandler:
             if keys_pressed[pg.K_x]:
                 intents[INTENTS['HEAVY_ATTACK']] = True
             
+            # Shield - Use LEFT SHIFT for Player 1
+            if keys_pressed[pg.K_LSHIFT]:
+                intents[INTENTS['SHIELD']] = True
+            
             if keys_pressed[pg.K_r]:
                 intents[INTENTS['RESTART']] = True
             
@@ -347,6 +354,10 @@ class InputHandler:
             
             if keys_pressed[pg.K_h]:
                 intents[INTENTS['HEAVY_ATTACK']] = True
+            
+            # Shield - Use E key for Player 2
+            if keys_pressed[pg.K_e]:
+                intents[INTENTS['SHIELD']] = True
     
     def _process_keyboard(self, keys_pressed):
         """
@@ -391,6 +402,10 @@ class InputHandler:
                 y_button = PRO_CONTROLLER['y_button']
                 x_button = PRO_CONTROLLER['x_button']
                 a_button = PRO_CONTROLLER['a_button']
+                l_button = PRO_CONTROLLER['l_button']
+                r_button = PRO_CONTROLLER['r_button']
+                zl_button = PRO_CONTROLLER['zl_button']
+                zr_button = PRO_CONTROLLER['zr_button']
                 
                 # Check if the buttons are pressed
                 if y_button < len(state['buttons']) and state['buttons'][y_button]:  # Y button
@@ -408,6 +423,53 @@ class InputHandler:
                     intents[INTENTS['MOVE_UP']] = True
                     if self.debug and self.debug_frame_counter % 30 == 0:
                         print(f"{player_name} A button ({a_button}) -> MOVE_UP (jump)")
+                
+                # Check for shield buttons (L and R)
+                # First try the specifically named buttons
+                shield_active = False
+                # Debug all button states to find which ones are pressed
+                if self.debug and self.debug_frame_counter % 10 == 0:
+                    # Print active buttons for debugging
+                    active_buttons = []
+                    for i, pressed in enumerate(state['buttons']):
+                        if pressed:
+                            active_buttons.append(str(i))
+                    if active_buttons:
+                        print(f"DEBUG: {player_name} active buttons: [{', '.join(active_buttons)}]")
+
+                # Check the main shield buttons (L, R, ZL, ZR)
+                if ((l_button < len(state['buttons']) and state['buttons'][l_button])):
+                    shield_active = True
+                    if self.debug:
+                        print(f"DEBUG: {player_name} L button ({l_button}) pressed for shield")
+                elif ((r_button < len(state['buttons']) and state['buttons'][r_button])):
+                    shield_active = True
+                    if self.debug:
+                        print(f"DEBUG: {player_name} R button ({r_button}) pressed for shield")
+                elif ((zl_button < len(state['buttons']) and state['buttons'][zl_button])):
+                    shield_active = True
+                    if self.debug:
+                        print(f"DEBUG: {player_name} ZL button ({zl_button}) pressed for shield")
+                elif ((zr_button < len(state['buttons']) and state['buttons'][zr_button])):
+                    shield_active = True
+                    if self.debug:
+                        print(f"DEBUG: {player_name} ZR button ({zr_button}) pressed for shield")
+
+                # If that didn't work, try the generic shield_buttons array as fallback
+                if not shield_active and 'shield_buttons' in PRO_CONTROLLER:
+                    for btn_idx in PRO_CONTROLLER['shield_buttons']:
+                        if btn_idx < len(state['buttons']) and state['buttons'][btn_idx]:
+                            shield_active = True
+                            if self.debug:
+                                print(f"DEBUG: {player_name} shield button {btn_idx} pressed via fallback array")
+                            break
+                
+                # Set the shield intent if any shield button is active
+                if shield_active:
+                    intents[INTENTS['SHIELD']] = True
+                    # Always print shield activation in debug mode (regardless of frame)
+                    if self.debug:
+                        print(f"DEBUG: {player_name} SHIELD intent activated - shield button pressed")
             
             # Get analog stick values
             x_axis = 0.0

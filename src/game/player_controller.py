@@ -88,12 +88,59 @@ class PlayerController:
         sprite.moving_right = False
         
         # Debug output to periodically check intent status
-        if hasattr(game, 'current_frame') and game.current_frame % 60 == 0 and game.controller_debug:
+        if hasattr(game, 'current_frame') and game.current_frame % 30 == 0 and game.controller_debug:
             move_left = input_handler.get_intent(self.player_name, INTENTS['MOVE_LEFT'])
             move_right = input_handler.get_intent(self.player_name, INTENTS['MOVE_RIGHT'])
             move_up = input_handler.get_intent(self.player_name, INTENTS['MOVE_UP'])
             move_down = input_handler.get_intent(self.player_name, INTENTS['MOVE_DOWN'])
-            print(f"{self.player_name} intents: LEFT={move_left}, RIGHT={move_right}, UP={move_up}, DOWN={move_down}")
+            shield = input_handler.get_intent(self.player_name, INTENTS['SHIELD'])
+            print(f"{self.player_name} intents: LEFT={move_left}, RIGHT={move_right}, UP={move_up}, DOWN={move_down}, SHIELD={shield}")
+            
+            # Extra debug info for shield state
+            if hasattr(sprite, 'shield_active'):
+                print(f"  Shield state: active={sprite.shield_active}, broken={getattr(sprite, 'shield_broken', False)}, health={getattr(sprite, 'shield_health', 0)}")
+        
+        # Always check for shield intent on every frame
+        if input_handler.get_intent(self.player_name, INTENTS['SHIELD']):
+            # Record shield attempt for debugging
+            if game.controller_debug and getattr(sprite, 'shield_active', False) != True:
+                print(f"DEBUG: {self.player_name} attempting to activate shield (frame {game.current_frame})")
+            
+            # Try to activate shield
+            if hasattr(sprite, 'activate_shield'):
+                # Add debug message - only print when shield is first activated
+                if not getattr(sprite, 'shield_active', False):
+                    print(f"DEBUG: {self.player_name} activating shield")
+                sprite.activate_shield()
+            # For backward compatibility with characters without shield methods
+            else:
+                if sprite.move != 'shield':
+                    print(f"DEBUG: {self.player_name} setting move to shield (legacy)")
+                sprite.move = 'shield'
+            
+            # Update player data
+            player_data['move'] = 'shield'
+            
+            # Force shield surface creation in case it wasn't created
+            if hasattr(sprite, 'shield_surface') and sprite.shield_surface is None:
+                if hasattr(sprite, 'create_shield_surface'):
+                    sprite.create_shield_surface()
+                    print(f"DEBUG: Recreated missing shield surface for {self.player_name}")
+            
+            # When shielding, don't allow other movement
+            self._update_player_data_from_sprite(player_data, sprite)
+            return
+        else:
+            # Deactivate shield if it was active
+            if hasattr(sprite, 'shield_active') and sprite.shield_active:
+                if hasattr(sprite, 'deactivate_shield'):
+                    print(f"DEBUG: {self.player_name} deactivating shield")
+                    sprite.deactivate_shield()
+                # For backward compatibility
+                elif sprite.move == 'shield':
+                    print(f"DEBUG: {self.player_name} changing move from shield to stand (legacy)")
+                    sprite.move = STAND
+                    player_data['move'] = STAND
         
         # Process drop-through and fast fall (MOVE_DOWN intent)
         if input_handler.get_intent(self.player_name, INTENTS['MOVE_DOWN']):
@@ -142,6 +189,12 @@ class PlayerController:
                 else:
                     sprite.vel.x = -3  # Default speed for non-analog input
                 sprite.move = WALK
+                
+                # Update walk animation frame counter (critical for animation)
+                # Only update every 5 frames to avoid animation being too fast
+                if hasattr(sprite, 'animation_frame_counter') and hasattr(sprite, 'walk_c'):
+                    if sprite.animation_frame_counter % 5 == 0:
+                        sprite.walk_c = (sprite.walk_c + 1) % len(sprite.walkL)
             
             # Update flags for animation and physics
             sprite.moving_left = True
@@ -171,6 +224,12 @@ class PlayerController:
                 else:
                     sprite.vel.x = 3  # Default speed for non-analog input
                 sprite.move = WALK
+                
+                # Update walk animation frame counter (critical for animation)
+                # Only update every 5 frames to avoid animation being too fast
+                if hasattr(sprite, 'animation_frame_counter') and hasattr(sprite, 'walk_c'):
+                    if sprite.animation_frame_counter % 5 == 0:
+                        sprite.walk_c = (sprite.walk_c + 1) % len(sprite.walkR)
             
             # Update flags for animation and physics
             sprite.moving_right = True

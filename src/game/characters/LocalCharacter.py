@@ -24,6 +24,21 @@ JUMP_HEIGHT_FACTOR = 1.0  # Adjust this to control jump height
 BASE_KNOCKBACK_X = 3.0  # Base horizontal knockback
 BASE_KNOCKBACK_Y = 2.0  # Base vertical knockback
 
+# Shield properties
+SHIELD_ALPHA = 190  # Transparency of shield
+# Default shield colors by character
+SHIELD_COLORS = {
+    'Mario': (255, 0, 0),       # Red
+    'Luigi': (0, 255, 0),       # Green
+    'Yoshi': (0, 255, 0),       # Green
+    'Popo': (0, 0, 255),        # Blue
+    'Nana': (255, 0, 255),      # Pink
+    'Link': (0, 255, 255),      # Cyan
+    'default': (255, 255, 255)  # White for any other character
+}
+SHIELD_SIZE = 80                 # Size of shield circle
+SHIELD_DURATION = 300           # Max shield frames before breaking (5 seconds at 60 FPS)
+
 vec = pg.math.Vector2
 
 # This is a modified base character class that doesn't rely on hardcoded keyboard input
@@ -82,6 +97,22 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         self.landing_recovery = 10  # Base landing recovery
         self.damage_stun = 15  # Base stun from taking damage
         
+        # Get character type for shield color
+        character_type = 'default'
+        for char_name in SHIELD_COLORS.keys():
+            if char_name in self.__class__.__name__:
+                character_type = char_name
+                break
+        
+        # Shield properties
+        self.shield_active = False
+        self.shield_health = SHIELD_DURATION
+        self.shield_surface = None
+        self.shield_color = SHIELD_COLORS.get(character_type, SHIELD_COLORS['default'])
+        self.shield_radius = SHIELD_SIZE // 2
+        self.shield_broken = False
+        self.shield_cooldown = 0  # Cooldown after shield break
+        
         # Graphics - scale all images to 2x size
         self.walkR = [self.scale_image(img) for img in images_walk_r]
         self.walkL = [self.scale_image(img) for img in images_walk_l]
@@ -123,6 +154,9 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             character_type = 'luigi'
         
         self.init_melee_physics(character_type)
+        
+        # Create shield surface
+        self.create_shield_surface()
     
     def scale_image(self, image):
         """Scale an image to the desired size (2x)"""
@@ -131,6 +165,39 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         new_width = int(current_width * CHARACTER_SCALE)
         new_height = int(current_height * CHARACTER_SCALE)
         return pg.transform.scale(image, (new_width, new_height))
+
+    def create_shield_surface(self):
+        """Create the shield surface with the character's color"""
+        self.shield_surface = pg.Surface((SHIELD_SIZE, SHIELD_SIZE), pg.SRCALPHA)
+        
+        # Draw the shield circle with a more visible glow effect
+        # Inner circle (more opaque)
+        pg.draw.circle(
+            self.shield_surface, 
+            (*self.shield_color, SHIELD_ALPHA),  # RGBA color with transparency
+            (self.shield_radius, self.shield_radius), 
+            self.shield_radius
+        )
+        
+        # Add a thinner border/outline for better visibility
+        border_width = 2  # Thinner border (was 3)
+        pg.draw.circle(
+            self.shield_surface,
+            (*self.shield_color, 255),  # Fully opaque for the border
+            (self.shield_radius, self.shield_radius),
+            self.shield_radius,
+            border_width
+        )
+        
+        # Add inner highlight for more visual flair - use same color but lighter
+        inner_radius = int(self.shield_radius * 0.7)
+        inner_color = tuple(min(c + 60, 255) for c in self.shield_color)  # Lighten color
+        pg.draw.circle(
+            self.shield_surface,
+            (*inner_color, 100),  # Semi-transparent for the inner highlight
+            (self.shield_radius, self.shield_radius),
+            inner_radius
+        )
 
     def jump(self):
         # Debug info to see if this function is getting called
@@ -162,6 +229,23 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         Returns the new damage percentage
         """
         try:
+            # If shield is active, don't take damage
+            if self.shield_active and not self.shield_broken:
+                # Reduce shield health based on damage
+                self.shield_health -= damage * 2  # Shield depletes faster than normal
+                
+                # Check if shield broke
+                if self.shield_health <= 0:
+                    self.shield_health = 0
+                    self.shield_broken = True
+                    self.shield_active = False
+                    self.shield_cooldown = 120  # 2 seconds cooldown (60 FPS)
+                    # Add shield break effect/animation here if desired
+                    print(f"{self.name}'s shield broke!")
+                
+                # No damage taken, return current damage
+                return self.damage_percent
+            
             # Use Melee physics for damage and knockback
             # For weak attacks, use low knockback growth
             # For heavy attacks, use higher knockback growth and base knockback
@@ -183,6 +267,10 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         except Exception as e:
             # Fallback to a basic implementation if there's an error
             print(f"Error in take_damage: {e}, using fallback method")
+            
+            # If shield is active, don't take damage
+            if self.shield_active and not self.shield_broken:
+                return self.damage_percent
             
             # Basic damage and knockback
             self.damage_percent += damage
@@ -254,6 +342,19 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         was_in_air = self.in_air
         was_knockback = getattr(self, 'is_knockback_air', False)
         
+        # Update shield cooldown if broken
+        if self.shield_broken and self.shield_cooldown > 0:
+            self.shield_cooldown -= 1
+            if self.shield_cooldown <= 0:
+                self.shield_broken = False
+                self.shield_health = SHIELD_DURATION  # Reset shield health
+        
+        # Regenerate shield health slowly when not in use
+        if not self.shield_active and not self.shield_broken and self.shield_health < SHIELD_DURATION:
+            self.shield_health += 0.5  # Slow regeneration rate
+            if self.shield_health > SHIELD_DURATION:
+                self.shield_health = SHIELD_DURATION
+        
         # Add debug every ~60 frames if in knockback
         if hasattr(self, 'is_knockback_air') and self.is_knockback_air and hasattr(self.game, 'current_frame'):
             if self.game.current_frame % 60 == 0:
@@ -278,6 +379,21 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
                 # After lock expires, return to standing if not moving
                 if self.move in [WEAK_ATTACK, HEAVY_ATTACK, DAMAGED, LANDING]:
                     self.move = STAND
+        
+        # Stop movement if shield is active
+        if self.shield_active:
+            self.vel.x = 0
+            self.acc.x = 0
+            
+            # Check if shield should break due to timeout
+            self.shield_health -= 1
+            if self.shield_health <= 0:
+                self.shield_health = 0
+                self.shield_broken = True
+                self.shield_active = False
+                self.shield_cooldown = 120  # 2 seconds cooldown
+                self.move = STAND
+                print(f"{self.name}'s shield broke from extended use!")
         
         # CRITICAL: Always check if we're actually on solid ground
         if not self.in_air:
@@ -595,48 +711,118 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         # Update walk animations at a normal speed (every 5 frames - same as other animations)
         should_update = self.animation_frame_counter % 5 == 0
         
-        if self.move == WALK:
+        if self.damage_percent >= 999:
+            self.image = self.dead_image
+            return
+
+        # First check shield state
+        if self.shield_active:
+            # Use standing sprite when shielding
             if self.direc == LEFT:
-                # Only update walk_c when should_update is True
-                if should_update:
-                    max_walk = len(self.walkL) - 1
-                    self.walk_c = (self.walk_c + 1) % max(1, max_walk)
-                self.image = self.walkL[min(self.walk_c, len(self.walkL)-1)]
-            elif self.direc == RIGHT:
-                # Only update walk_c when should_update is True
-                if should_update:
-                    max_walk = len(self.walkR) - 1
-                    self.walk_c = (self.walk_c + 1) % max(1, max_walk)
-                self.image = self.walkR[min(self.walk_c, len(self.walkR)-1)]
-        
+                self.image = self.standL
+            else:
+                self.image = self.standR
+        elif self.move == WALK:
+            # Handle normal animation states
+            walk_frame = min(self.walk_c, len(self.walkL) - 1)  # Prevents index errors
+            if self.direc == LEFT:
+                self.image = self.walkL[walk_frame]
+            else:
+                self.image = self.walkR[walk_frame]
         elif self.move == STAND:
             if self.direc == LEFT:
                 self.image = self.standL
-            elif self.direc == RIGHT:
+            else:
                 self.image = self.standR
-
         elif self.move == WEAK_ATTACK:
             if self.direc == LEFT:
                 self.image = self.weakL
-            elif self.direc == RIGHT:
+            else:
                 self.image = self.weakR
-
         elif self.move == HEAVY_ATTACK:
             if self.direc == LEFT:
                 self.image = self.heavyL
-            elif self.direc == RIGHT:
+            else:
                 self.image = self.heavyR
-        
-        elif self.move == DAMAGED or self.move == LANDING:
-            # Both damaged and landing use the same animation for now
+        elif self.move == DAMAGED:
             if self.direc == LEFT:
                 self.image = self.damagedL
-            elif self.direc == RIGHT:
+            else:
                 self.image = self.damagedR
-
-        if self.damage_percent >= 999:
-            self.image = self.dead_image
-
+        elif self.move == LANDING:
+            # Use standing sprite for landing
+            if self.direc == LEFT:
+                self.image = self.standL
+            else:
+                self.image = self.standR
+                
+    def draw(self, surface):
+        """Draw the character and shield if active"""
+        # First draw the character sprite
+        surface.blit(self.image, self.rect)
+        
+        # Debug output - only log every 60 frames or when state changes
+        should_log = False
+        if hasattr(self.game, 'current_frame'):
+            if self.game.current_frame % 60 == 0:  # Only log every 60 frames (~1 second)
+                should_log = True
+        
+        # Track shield state change for logging
+        last_shield_state = getattr(self, '_last_shield_state', None)
+        current_shield_state = (self.shield_active, self.shield_broken)
+        self._last_shield_state = current_shield_state
+        
+        if last_shield_state != current_shield_state:
+            should_log = True  # Log on state change
+        
+        # Draw shield if active - moved this after character drawing for better visibility
+        if self.shield_active and not self.shield_broken:
+            if should_log and hasattr(self.game, 'shield_debug') and self.game.shield_debug:
+                print(f"DEBUG: Drawing shield for {self.name} at position {self.rect.center}")
+            
+            # Make sure shield surface exists
+            if self.shield_surface is None:
+                print(f"DEBUG: Shield surface was None, recreating for {self.name}")
+                self.create_shield_surface()
+            
+            # Position shield around character's center
+            shield_rect = self.shield_surface.get_rect()
+            shield_rect.center = self.rect.center
+            
+            # Draw shield
+            surface.blit(self.shield_surface, shield_rect)
+            
+            # Draw shield health indicator (optional)
+            if hasattr(self, 'shield_health') and SHIELD_DURATION > 0:
+                # Calculate shield health percentage
+                shield_percent = self.shield_health / SHIELD_DURATION
+                
+                # Draw a small health bar above the shield
+                bar_width = 30
+                bar_height = 3
+                bar_x = shield_rect.centerx - bar_width // 2
+                bar_y = shield_rect.top - 8
+                
+                # Background (gray)
+                pg.draw.rect(surface, (80, 80, 80), (bar_x, bar_y, bar_width, bar_height))
+                
+                # Health (green to red based on health)
+                health_width = int(bar_width * shield_percent)
+                if shield_percent > 0.7:
+                    health_color = (0, 255, 0)  # Green
+                elif shield_percent > 0.3:
+                    health_color = (255, 255, 0)  # Yellow
+                else:
+                    health_color = (255, 0, 0)  # Red
+                    
+                pg.draw.rect(surface, health_color, (bar_x, bar_y, health_width, bar_height))
+        elif self.shield_active and should_log and hasattr(self.game, 'shield_debug') and self.game.shield_debug:
+            # If shield is active but broken, only log occasionally
+            print(f"DEBUG: Shield is active but broken for {self.name}")
+        elif self.move == SHIELD and should_log and hasattr(self.game, 'shield_debug') and self.game.shield_debug:
+            # If move is shield but shield_active is False, only log occasionally
+            print(f"DEBUG: Move is SHIELD but shield_active is False for {self.name}")
+            
     def can_move(self):
         """Check if character can be controlled by movement inputs"""
         return not self.animation_locked and self.damage_percent < 999 and self.hitstun_frames <= 0
@@ -696,6 +882,39 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
                 return True
                 
         return False
+
+    def activate_shield(self):
+        """Activate shield if it's not broken"""
+        if not self.shield_broken and self.shield_cooldown <= 0:
+            if not self.shield_active:
+                # Print debug message when shield activates
+                print(f"{self.name}'s shield activated")
+            self.shield_active = True
+            self.move = SHIELD
+            
+            # Make sure shield surface is created
+            if self.shield_surface is None:
+                print(f"DEBUG: Creating shield surface for {self.name} in activate_shield")
+                self.create_shield_surface()
+            
+            # Return True if successful
+            return True
+        else:
+            # Return False if shield can't be activated
+            if self.shield_broken:
+                print(f"DEBUG: Can't activate shield for {self.name} - shield is broken")
+            elif self.shield_cooldown > 0:
+                print(f"DEBUG: Can't activate shield for {self.name} - shield on cooldown ({self.shield_cooldown})")
+            return False
+
+    def deactivate_shield(self):
+        """Deactivate shield"""
+        if self.shield_active:
+            # Print debug message when shield deactivates
+            print(f"{self.name}'s shield deactivated")
+        self.shield_active = False
+        if self.move == SHIELD:
+            self.move = STAND
 
 # Create local character versions of each character
 

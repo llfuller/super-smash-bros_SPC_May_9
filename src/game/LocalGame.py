@@ -17,7 +17,8 @@ import random
 # Fix import paths to use direct imports since we're in the game directory
 from characters.LocalCharacter import (
     LocalMario, LocalLuigi, LocalYoshi, 
-    LocalPopo, LocalNana, LocalLink
+    LocalPopo, LocalNana, LocalLink,
+    SHIELD_COLORS, SHIELD_ALPHA, SHIELD_SIZE
 )
 
 # menus
@@ -83,6 +84,9 @@ class LocalGame:
         # Controller debugging
         self.controller_debug = False  # Can be toggled with F1
         self.last_controller_debug = 0
+        
+        # Shield debugging
+        self.shield_debug = False  # For debugging shield rendering issues
         
         # player variables
         self.player_names = ["", ""]  # player1, player2
@@ -535,8 +539,118 @@ class LocalGame:
             # check method below
             self.drawStatsBoard()
             
-            # show all the sprites
-            self.all_sprites.draw(self.screen)
+            # First draw non-player sprites using the sprite group
+            non_player_sprites = [sprite for sprite in self.all_sprites 
+                                if not any(sprite == player_data.get('sprite') for player_data in self.players.values() if 'sprite' in player_data)]
+            
+            # Create a temporary group for non-player sprites and draw them
+            temp_group = pg.sprite.Group()
+            for sprite in non_player_sprites:
+                temp_group.add(sprite)
+            temp_group.draw(self.screen)
+            
+            # Then manually call draw for each player sprite to ensure custom draw methods are used
+            player_sprites_drawn = 0
+            for name, player_data in self.players.items():
+                if 'sprite' in player_data:
+                    sprite = player_data['sprite']
+                    # If sprite has a custom draw method, use it
+                    if hasattr(sprite, 'draw') and callable(sprite.draw):
+                        if self.shield_debug:
+                            print(f"DEBUG: Using custom draw method for {name}")
+                        sprite.draw(self.screen)
+                        player_sprites_drawn += 1
+                    else:
+                        # Fall back to default drawing
+                        if self.shield_debug:
+                            print(f"DEBUG: Using fallback draw method for {name}")
+                        self.screen.blit(sprite.image, sprite.rect)
+                        player_sprites_drawn += 1
+            
+            if self.shield_debug:
+                print(f"DEBUG: Drew {player_sprites_drawn} player sprites with their custom draw methods")
+                self.drawShieldDebugInfo()
+            
+            # Draw shields for characters in shield mode (only for sprites that don't handle their own shield drawing)
+            for name, player_data in self.players.items():
+                if 'sprite' in player_data:
+                    sprite = player_data['sprite']
+                    # If sprite has shield active AND doesn't have its own draw method
+                    if (sprite.move == SHIELD or hasattr(sprite, 'shield_active') and sprite.shield_active) and not (hasattr(sprite, 'draw') and callable(sprite.draw)):
+                        # Create shield surface
+                        shield_size = SHIELD_SIZE  # Use same size as character class
+                        shield_radius = shield_size // 2
+                        shield_surface = pg.Surface((shield_size, shield_size), pg.SRCALPHA)
+                        
+                        # Determine shield color based on character
+                        character_type = player_data.get('character', 'default')
+                        # Find the matching shield color
+                        shield_color = SHIELD_COLORS.get('default', (255, 255, 255))
+                        for char_name, color in SHIELD_COLORS.items():
+                            if char_name in character_type:
+                                shield_color = color
+                                break
+                        
+                        # Draw shield circle with inner glow
+                        pg.draw.circle(
+                            shield_surface, 
+                            (*shield_color, SHIELD_ALPHA),  # Use same alpha as character class
+                            (shield_radius, shield_radius), 
+                            shield_radius
+                        )
+                        
+                        # Add a thinner border for better visibility (matching character class)
+                        border_width = 2  # Thinner border (2px)
+                        pg.draw.circle(
+                            shield_surface,
+                            (*shield_color, 255),  # Fully opaque for the border
+                            (shield_radius, shield_radius),
+                            shield_radius,
+                            border_width
+                        )
+                        
+                        # Add inner highlight for more visual flair - use same color but lighter
+                        inner_radius = int(shield_radius * 0.7)
+                        inner_color = tuple(min(c + 60, 255) for c in shield_color)  # Lighten color
+                        pg.draw.circle(
+                            shield_surface,
+                            (*inner_color, 100),  # Semi-transparent for the inner highlight
+                            (shield_radius, shield_radius),
+                            inner_radius
+                        )
+                        
+                        # Position shield around character's center
+                        shield_rect = shield_surface.get_rect()
+                        shield_rect.center = sprite.rect.center
+                        
+                        # Draw shield
+                        self.screen.blit(shield_surface, shield_rect)
+                        
+                        # Add shield health indicator if available
+                        if hasattr(sprite, 'shield_health') and hasattr(sprite, 'shield_broken') and not sprite.shield_broken:
+                            # Calculate shield health percentage
+                            shield_max = getattr(sprite, 'SHIELD_DURATION', 300)  # Default if not found
+                            shield_percent = sprite.shield_health / shield_max
+                            
+                            # Draw a small health bar above the shield
+                            bar_width = 30
+                            bar_height = 3
+                            bar_x = shield_rect.centerx - bar_width // 2
+                            bar_y = shield_rect.top - 8
+                            
+                            # Background (gray)
+                            pg.draw.rect(self.screen, (80, 80, 80), (bar_x, bar_y, bar_width, bar_height))
+                            
+                            # Health (green to red based on health)
+                            health_width = int(bar_width * shield_percent)
+                            if shield_percent > 0.7:
+                                health_color = (0, 255, 0)  # Green
+                            elif shield_percent > 0.3:
+                                health_color = (255, 255, 0)  # Yellow
+                            else:
+                                health_color = (255, 0, 0)  # Red
+                                
+                            pg.draw.rect(self.screen, health_color, (bar_x, bar_y, health_width, bar_height))
 
             # write the player's name on top of the sprite
             font = pg.font.Font(None, 20)
@@ -956,6 +1070,26 @@ class LocalGame:
                 if 'sprite' in player_data:
                     sprite = player_data['sprite']
                     
+                    # Check if shield is active
+                    if sprite.move == SHIELD or (hasattr(sprite, 'shield_active') and sprite.shield_active):
+                        if hasattr(sprite, 'shield_active') and not sprite.shield_broken:
+                            # Shield blocks damage but depletes shield health
+                            if hasattr(sprite, 'shield_health'):
+                                sprite.shield_health -= damage * 2  # Shield depletes faster
+                                
+                                # Check if shield broke
+                                if sprite.shield_health <= 0:
+                                    sprite.shield_health = 0
+                                    sprite.shield_broken = True
+                                    sprite.shield_active = False
+                                    sprite.shield_cooldown = 120  # 2 seconds cooldown (60 FPS)
+                                    sprite.move = STAND
+                                    print(f"{player_name}'s shield broke!")
+                            
+                            # No damage or knockback when shielded
+                            print(f"{player_name} blocked {damage}% damage with shield")
+                            return
+                    
                     # Determine knockback values based on damage amount from attacker
                     # (This is handled inside the sprite's take_damage method)
                     new_damage = sprite.take_damage(damage, attacker_pos_x)
@@ -1051,6 +1185,58 @@ class LocalGame:
         self.all_sprites = pg.sprite.Group()
         self.platforms = pg.sprite.Group()
         self.loadPlatforms()
+
+    def drawShieldDebugInfo(self):
+        """Draw debug information about shield state for each player"""
+        if not self.shield_debug:
+            return
+        
+        # Font for debug text
+        font = pg.font.Font(None, 16)
+        
+        # Draw shield debug info for each player
+        y_pos = 40
+        for name, player_data in self.players.items():
+            if 'sprite' in player_data:
+                sprite = player_data['sprite']
+                
+                # Display shield state
+                shield_active = getattr(sprite, 'shield_active', False)
+                shield_broken = getattr(sprite, 'shield_broken', False)
+                shield_health = getattr(sprite, 'shield_health', 0)
+                shield_color = getattr(sprite, 'shield_color', (255, 255, 255))
+                
+                # Choose color based on state
+                if shield_active and not shield_broken:
+                    color = (0, 255, 0)  # Green for active shield
+                elif shield_broken:
+                    color = (255, 0, 0)  # Red for broken shield
+                else:
+                    color = (255, 255, 255)  # White for inactive shield
+                
+                # Shield state text
+                shield_text = f"{name} Shield: Active={shield_active}, Broken={shield_broken}, Health={shield_health}"
+                text_surface = font.render(shield_text, True, color)
+                self.screen.blit(text_surface, (350, y_pos))
+                
+                # Display shield color
+                color_text = f"Color: RGB{shield_color}"
+                color_surface = font.render(color_text, True, shield_color)
+                self.screen.blit(color_surface, (350, y_pos + 15))
+                
+                # Draw a small color swatch showing the actual shield color
+                pg.draw.rect(self.screen, shield_color, (580, y_pos + 10, 20, 10))
+                pg.draw.rect(self.screen, (255, 255, 255), (580, y_pos + 10, 20, 10), 1)  # White outline
+                
+                y_pos += 35  # More space between players
+                
+                # Draw a visual indicator at the character's position if shield should be active
+                if shield_active and not shield_broken:
+                    # Draw a small indicator at the character's position
+                    if hasattr(sprite, 'rect') and hasattr(sprite.rect, 'center'):
+                        center_x, center_y = sprite.rect.center
+                        pg.draw.circle(self.screen, shield_color, (center_x, center_y), 5)  # Use actual shield color
+                        pg.draw.circle(self.screen, (255, 255, 255), (center_x, center_y), 5, 1)  # White outline
 
 # main start of the program
 game = LocalGame()

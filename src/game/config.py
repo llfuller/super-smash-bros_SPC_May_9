@@ -41,10 +41,10 @@ PRO_CONTROLLER = {
     'x_button': 3,    # X button 
     'b_button': 1,    # B button (Weak attack) - Right button
     'a_button': 2,    # A button
-    'l_button': 4,    # L button
-    'r_button': 5,    # R button
-    'zl_button': 6,   # ZL button
-    'zr_button': 7,   # ZR button
+    'l_button': 9,    # L button - Shield (corrected from 4 to 9)
+    'r_button': 10,   # R button - Shield (corrected from 5 to 10)
+    'zl_button': 6,   # ZL button - Shield
+    'zr_button': 7,   # ZR button - Shield
     'minus': 8,       # Minus button
     'plus': 9,        # Plus button
     'l_stick': 10,    # Left stick press
@@ -55,6 +55,10 @@ PRO_CONTROLLER = {
     'l_stick_y': 1,   # Left stick Y axis
     'r_stick_x': 2,   # Right stick X axis
     'r_stick_y': 3,   # Right stick Y axis
+    
+    # Additional shield button fallbacks for different controller types
+    # These may be different on non-Switch controllers
+    'shield_buttons': [9, 10, 6, 7, 4, 5]  # L, R, ZL, ZR + fallbacks
 }
 
 # Default game settings

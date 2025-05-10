@@ -286,6 +286,45 @@ class Game:
             
             # show all the sprites
             self.all_sprites.draw(self.screen)
+            
+            # Draw shields for characters in shield mode
+            for player in self.players.values():
+                if player.move == SHIELD:
+                    # Create shield surface
+                    shield_size = 60
+                    shield_radius = shield_size // 2
+                    shield_surface = pg.Surface((shield_size, shield_size), pg.SRCALPHA)
+                    
+                    # Determine shield color based on character
+                    if player.name.startswith('Mario'):
+                        shield_color = (255, 0, 0, 150)  # Red with 150 alpha
+                    elif player.name.startswith('Luigi'):
+                        shield_color = (0, 255, 0, 150)  # Green with 150 alpha
+                    elif player.name.startswith('Yoshi'):
+                        shield_color = (0, 255, 0, 150)  # Green with 150 alpha
+                    elif player.name.startswith('Popo'):
+                        shield_color = (0, 0, 255, 150)  # Blue with 150 alpha
+                    elif player.name.startswith('Nana'):
+                        shield_color = (255, 0, 255, 150)  # Pink with 150 alpha
+                    elif player.name.startswith('Link'):
+                        shield_color = (0, 255, 255, 150)  # Cyan with 150 alpha
+                    else:
+                        shield_color = (255, 255, 255, 150)  # White with 150 alpha
+                    
+                    # Draw shield circle
+                    pg.draw.circle(
+                        shield_surface, 
+                        shield_color,
+                        (shield_radius, shield_radius), 
+                        shield_radius
+                    )
+                    
+                    # Position shield around character's center
+                    shield_rect = shield_surface.get_rect()
+                    shield_rect.center = player.rect.center
+                    
+                    # Draw shield
+                    self.screen.blit(shield_surface, shield_rect)
 
             # write the player's name on top of the sprite
             font = pg.font.Font(None, 20)
@@ -624,9 +663,21 @@ class Game:
         message = 'UPDATE_ALL_PLAYERS'
         self.send(message)
 
-    def attackPlayer(self, player, damage, move):
+    def attackPlayer(self, player, damage, move, attacker_pos_x=0):
         message = 'ATTACK_PLAYER '
-        message += player + ' ' + str(damage) + ' ' + move
+        
+        # Check if the player being attacked is in shield state
+        if player in self.players and self.players[player].move == SHIELD:
+            # No damage when shielded, but still update the player state
+            message += player + ' ' + str(0) + ' ' + SHIELD
+        else:
+            # Normal attack if not shielded
+            message += player + ' ' + str(damage) + ' ' + move
+            
+        # Send the attacker's X position for knockback direction
+        if attacker_pos_x > 0:
+            message += ' ' + str(attacker_pos_x)
+            
         self.send(message)
 
     def restartRequest(self):

@@ -41,6 +41,26 @@ if pg.joystick.get_count() > 0:
         controller_found = True
         print(f"Switch Pro Controller detected: {controller_name}")
         print("Controller will be used for Player 1.")
+        
+        # Simple controller diagnostic test
+        print("\nPerforming quick controller test...")
+        print("Press any button on your controller to see its number...")
+        
+        # Run a quick test showing button presses
+        test_start = time.time()
+        test_active = True
+        while test_active and (time.time() - test_start < 5):  # Run for 5 seconds
+            for event in pg.event.get():
+                if event.type == pg.JOYBUTTONDOWN:
+                    print(f"Button pressed: {event.button}")
+                    if event.button in [9, 10]:
+                        print(">>> This is a Shield button (L or R)! <<<")
+                        
+            # End test early if 3 seconds have passed
+            if time.time() - test_start > 3:
+                test_active = False
+                
+        print("Controller test complete!\n")
     except Exception as e:
         print(f"Controller detected but initialization failed: {e}")
         print("Falling back to keyboard controls.")
@@ -61,6 +81,8 @@ if controller_found:
     print("- Left Stick/D-pad DOWN: Fast fall (when already falling)")
     print("- B button: Weak attack")
     print("- Y button: Heavy attack")
+    print("- L/R buttons (9/10): Shield (hold to activate)")
+    print("- ZL/ZR buttons: Shield (hold to activate)")
     print("- Plus button: Restart game (after match)")
     print("- Minus button: Return to menu (after match)")
     print("- Home button: Quit game (after match)")
@@ -70,6 +92,7 @@ else:
     print("- DOWN: Fast fall (when already falling)")
     print("- Z: Weak attack")
     print("- X: Heavy attack")
+    print("- LEFT SHIFT: Shield (hold to activate)")
 
 print()
 print("Player 2:")
@@ -77,12 +100,20 @@ print("- WASD keys: Movement")
 print("- S: Fast fall (when already falling)")
 print("- G: Weak attack")
 print("- H: Heavy attack")
+print("- E: Shield (hold to activate)")
 print()
 print("Game Features:")
 print("- Authentic Super Smash Bros Melee physics")
 print("- Character sizes match real Melee proportions")
 print("- Realistic knockback formula based on damage percentage")
 print("- Accurate movement speeds and acceleration values")
+print("- Shield blocking to prevent damage (visible as colored bubble)")
+print()
+print("Shield Troubleshooting:")
+print("- For Pro Controller: Use L/R buttons (9/10) to activate shield")
+print("- Make sure to HOLD the button (not just tap)")
+print("- Shield shows as a colored bubble around character")
+print("- Press F1 to see detailed controller debugging info")
 print()
 print("Starting the game...")
 
@@ -127,5 +158,9 @@ if controller_found:
 # Force debug mode to be on initially to help diagnose controller issues
 game.controller_debug = True
 print("Controller debug mode enabled by default - press F1 to toggle")
+
+# Enable shield debug mode to help diagnose shield rendering issues
+game.shield_debug = True
+print("Shield debug mode enabled to diagnose rendering issues")
 
 game.new() 

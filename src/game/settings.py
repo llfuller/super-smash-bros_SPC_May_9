@@ -44,6 +44,7 @@ WEAK_ATTACK = 'weak'
 HEAVY_ATTACK = 'heavy'
 DAMAGED = 'damaged'
 DEAD = 'dead'
+SHIELD = 'shield'
 
 # player movement values
 FRIC = -0.12
