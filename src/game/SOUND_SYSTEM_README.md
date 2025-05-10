@@ -14,6 +14,7 @@ The sound system provides a comprehensive way to add sound effects and backgroun
 - Character-specific victory themes
 - UI sound effects (button clicks, selections)
 - Character-specific attack sounds
+- Character-specific jump sounds
 - Hit sounds based on damage intensity
 - Shield sounds (activation, deactivation, blocking, breaking)
 - Sound caching for better performance
@@ -27,6 +28,7 @@ Sounds are organized in categories within the `SoundManager` class:
 - **HIT_SOUNDS**: Impact sounds when attacks connect (.wav)
 - **ATTACK_SOUNDS**: Sounds when characters attack (before hit) (.wav)
 - **SHIELD_SOUNDS**: Shield activation/deactivation/breaking sounds (.wav)
+- **JUMP_SOUNDS**: Sounds when characters jump (.wav)
 - **CHARACTER_SOUNDS**: Character-specific sounds (.wav)
 - **BACKGROUND_MUSIC**: Music tracks for different game sections (.mp3)
 - **STAGE_MUSIC**: Stage-specific battle music (.mp3)
@@ -46,6 +48,7 @@ The sound system has been integrated at the following points:
    - Taking damage
    - Shield activation/deactivation
    - Shield blocks and breaks
+   - Character jumps (standard, short hop, high jump)
 
 3. **Game State Changes**:
    - Starting the game (with stage-specific music)
@@ -65,6 +68,11 @@ sound_manager.play_damage_sound(damage_amount)
 
 # Play character-specific sounds
 sound_manager.play_character_sound('Mario', 'attack_weak')
+
+# Play jump sounds
+sound_manager.play_jump_sound('Mario', 'standard')
+sound_manager.play_jump_sound('Samus', 'high_jump')
+sound_manager.play_jump_sound(character=None, jump_type='short_hop')  # Generic short hop sound
 
 # Play shield sounds
 sound_manager.play_shield_sound('on')
@@ -106,6 +114,15 @@ The music is organized into specific categories:
 2. **Battle Music**: Stage-specific music played during battles
 3. **Victory Music**: Character-specific victory themes played when a player wins
 4. **Bonus Music**: Special music for bonus stages or events
+
+## Jump Sound System
+
+The jump sound system includes three types of jumps:
+- **Standard Jump**: Default jump sounds
+- **Short Hop**: Quicker, shorter jump sounds
+- **High Jump**: More powerful jump sounds (used by characters like Samus)
+
+Character-specific jump sounds are prioritized when available.
 
 ## Technical Details
 

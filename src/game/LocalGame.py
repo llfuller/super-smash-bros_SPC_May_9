@@ -13,6 +13,7 @@ import pygame as pg
 import json
 import copy
 import random
+import time
 
 # Fix import paths to use direct imports since we're in the game directory
 from characters.LocalCharacter import (
@@ -745,6 +746,9 @@ class LocalGame:
 
             # Draw recent events
             self.drawRecentEvents()
+
+            # Draw recent sound effects
+            self.drawRecentSounds()
 
             pg.display.flip()
             
@@ -1489,6 +1493,68 @@ class LocalGame:
             
             # Move up for next event
             y_pos -= text_height + 10
+
+    def drawRecentSounds(self):
+        """Draw recent sound effects on the screen"""
+        # Get recent sounds from sound manager
+        recent_sounds = sound_manager.get_recent_sounds()
+        
+        # If no recent sounds, don't draw anything
+        if not recent_sounds:
+            return
+            
+        # Define display parameters
+        font = pg.font.SysFont('Arial', 14)
+        bg_color = (0, 0, 0, 180)  # Semi-transparent black
+        text_color = (255, 255, 255)  # White text
+        highlight_color = (255, 255, 0)  # Yellow for newest sounds
+        border_color = (100, 100, 100)  # Grey border
+        
+        # Position in top right corner with margin
+        x = BG_SIZE[0] - 220
+        y = 30
+        
+        # Create background surface with transparency
+        padding = 10
+        line_height = 20
+        max_display = 5  # Maximum sounds to display
+        display_count = min(max_display, len(recent_sounds))
+        
+        # Sort by timestamp (newest first)
+        sorted_sounds = sorted(recent_sounds, key=lambda x: x[0], reverse=True)[:max_display]
+        
+        # Calculate background height
+        bg_height = (display_count * line_height) + (padding * 2)
+        
+        # Create semi-transparent background
+        bg_surface = pg.Surface((200, bg_height), pg.SRCALPHA)
+        pg.draw.rect(bg_surface, bg_color, (0, 0, 200, bg_height))
+        pg.draw.rect(bg_surface, border_color, (0, 0, 200, bg_height), 1)  # Add border
+        
+        # Draw title
+        title_font = pg.font.SysFont('Arial', 14, bold=True)
+        title_text = title_font.render("Recent Sound Effects", True, highlight_color)
+        bg_surface.blit(title_text, (padding, padding))
+        
+        # Draw each sound
+        current_time = time.time()
+        for i, (timestamp, sound_type, sound_name, description) in enumerate(sorted_sounds):
+            # Calculate position (offset for title)
+            text_y = (i * line_height) + padding + 20
+            
+            # Determine text color based on age (highlight newest sounds)
+            age = current_time - timestamp
+            if age < 1.0:  # Less than 1 second old
+                color = highlight_color
+            else:
+                color = text_color
+            
+            # Render text with description
+            text = font.render(description, True, color)
+            bg_surface.blit(text, (padding, text_y))
+        
+        # Draw the surface
+        self.screen.blit(bg_surface, (x, y))
 
     # Add the bob-omb spawning method
     def spawn_bobomb(self):

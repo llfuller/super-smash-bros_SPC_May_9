@@ -261,13 +261,27 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             print(f"{self.name} can't jump because already in air")
             return False
         
+        # Character type detection for playing the right sound
+        character_type = self.__class__.__name__.replace('Local', '')
+        
         # Apply different upward impulse based on jump type
         if is_short_hop:
             self.vel.y = -10  # Reduced velocity for short hop
             print(f"{self.name} short hopped with velocity {self.vel.y}")
+            
+            # Play short hop sound
+            sound_manager.play_jump_sound(character=character_type, jump_type='short_hop')
         else:
             self.vel.y = -16  # Full jump velocity
             print(f"{self.name} full jumped with velocity {self.vel.y}")
+            
+            # Play jump sound based on character type
+            if 'Samus' in self.__class__.__name__:
+                # Samus has a special high jump sound
+                sound_manager.play_jump_sound(character='Samus', jump_type='high_jump')
+            else:
+                # Standard jump sound
+                sound_manager.play_jump_sound(character=character_type, jump_type='standard')
             
         self.in_air = True
         self.is_jumping = True
@@ -367,12 +381,14 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             self.animation_lock_duration = self.weak_attack_recovery
             self.move = WEAK_ATTACK
             
-            # Play weak attack sound
-            sound_manager.play_attack_sound('weak')
+            # Get character type for sound effects
+            character_type = self.__class__.__name__.replace('Local', '')
+            
+            # Play weak attack sound with character voice
+            sound_manager.play_attack_sound('weak', character_type)
             
             # Try to play character-specific attack sound if available
-            character_name = self.__class__.__name__.replace('Local', '')
-            sound_manager.play_character_sound(character_name, 'attack_weak')
+            sound_manager.play_character_sound(character_type, 'attack_weak')
             
             # Check collision with enemies
             enemy_group = getattr(self, 'enemy_sprites', self.game.enemy_sprites)
@@ -394,12 +410,14 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             self.animation_lock_duration = self.heavy_attack_recovery
             self.move = HEAVY_ATTACK
             
-            # Play heavy attack sound
-            sound_manager.play_attack_sound('heavy')
+            # Get character type for sound effects
+            character_type = self.__class__.__name__.replace('Local', '')
+            
+            # Play heavy attack sound with character voice
+            sound_manager.play_attack_sound('heavy', character_type)
             
             # Try to play character-specific attack sound if available
-            character_name = self.__class__.__name__.replace('Local', '')
-            sound_manager.play_character_sound(character_name, 'attack_heavy')
+            sound_manager.play_character_sound(character_type, 'attack_heavy')
             
             # Check collision with enemies
             enemy_group = getattr(self, 'enemy_sprites', self.game.enemy_sprites)
@@ -1003,6 +1021,12 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             
             # Increase damage percentage
             self.damage_percent += damage
+            
+            # Get character type for sound effects
+            character_type = self.__class__.__name__.replace('Local', '')
+            
+            # Play damage sound with character voice
+            sound_manager.play_damage_sound(damage, character_type)
             
             # Calculate knockback
             if 'calculate_knockback' in globals():
