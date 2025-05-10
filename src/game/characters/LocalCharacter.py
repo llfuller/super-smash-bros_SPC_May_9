@@ -4,7 +4,7 @@ import math
 
 # move up one directory to be able to import the settings and images
 sys.path.append("..")
-from settings import *
+from settings import *  # Import all settings including GIANT_MODE_ENABLED and GIANT_MODE_SCALE_FACTOR
 from images import *
 from characters.MeleePhysics import MeleePhysicsMixin  # Import the mixin
 from melee_physics import KNOCKBACK_EXAMPLES, calculate_knockback, calculate_hitstun, knockback_to_velocity  # Import needed constants
@@ -12,8 +12,12 @@ from melee_physics import KNOCKBACK_EXAMPLES, calculate_knockback, calculate_hit
 # Add new animation state
 LANDING = 'landing'
 
-# Character size scaling factor
-CHARACTER_SCALE = 2.0
+# Character size scaling factor - now we use the settings from settings.py
+# CHARACTER_SCALE = 2.0
+
+# GIANT MODE scaling - we'll use the settings from settings.py
+# GIANT_MODE_ENABLED = False  # Set to True to enable GIANT MODE
+# GIANT_MODE_SCALE_FACTOR = 1.75  # This will make characters 1.75x bigger than normal
 
 # Movement speed multiplier (horizontal only)
 MOVEMENT_SPEED_MULTIPLIER = 2.0
@@ -37,8 +41,20 @@ SHIELD_COLORS = {
     'Link': (0, 255, 255),      # Cyan
     'default': (255, 255, 255)  # White for any other character
 }
-SHIELD_SIZE = 80                 # Size of shield circle
+SHIELD_SIZE = 80                 # Base shield size
 SHIELD_DURATION = 300           # Max shield frames before breaking (5 seconds at 60 FPS)
+
+# Get shield size accounting for GIANT MODE scaling
+def get_shield_size():
+    """Get shield size based on GIANT MODE settings"""
+    shield_size = SHIELD_SIZE
+    
+    # Apply GIANT MODE scaling if enabled in settings
+    if getattr(sys.modules['settings'], 'GIANT_MODE_ENABLED', False):
+        giant_scale = getattr(sys.modules['settings'], 'GIANT_MODE_SCALE_FACTOR', 1.75)
+        shield_size = int(shield_size * giant_scale)
+        
+    return shield_size
 
 vec = pg.math.Vector2
 
@@ -160,24 +176,39 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         self.create_shield_surface()
     
     def scale_image(self, image):
-        """Scale an image to the desired size (2x)"""
+        """Scale an image to the desired size (accounting for GIANT MODE)"""
         current_width = image.get_width()
         current_height = image.get_height()
-        new_width = int(current_width * CHARACTER_SCALE)
-        new_height = int(current_height * CHARACTER_SCALE)
+        
+        # Calculate the effective scale based on whether GIANT MODE is enabled
+        # Default scale is 2.0 if not specified in settings
+        scale_factor = getattr(sys.modules['settings'], 'CHARACTER_SCALE', 2.0)
+        
+        # Apply GIANT MODE scaling if enabled in settings
+        if getattr(sys.modules['settings'], 'GIANT_MODE_ENABLED', False):
+            giant_scale = getattr(sys.modules['settings'], 'GIANT_MODE_SCALE_FACTOR', 1.75)
+            scale_factor *= giant_scale
+        
+        new_width = int(current_width * scale_factor)
+        new_height = int(current_height * scale_factor)
         return pg.transform.scale(image, (new_width, new_height))
 
     def create_shield_surface(self):
         """Create the shield surface with the character's color"""
-        self.shield_surface = pg.Surface((SHIELD_SIZE, SHIELD_SIZE), pg.SRCALPHA)
+        # Get scaled shield size based on GIANT MODE setting
+        scaled_shield_size = get_shield_size()
+        scaled_shield_radius = scaled_shield_size // 2
+        
+        self.shield_surface = pg.Surface((scaled_shield_size, scaled_shield_size), pg.SRCALPHA)
+        self.shield_radius = scaled_shield_radius
         
         # Draw the shield circle with a more visible glow effect
         # Inner circle (more opaque)
         pg.draw.circle(
             self.shield_surface, 
             (*self.shield_color, SHIELD_ALPHA),  # RGBA color with transparency
-            (self.shield_radius, self.shield_radius), 
-            self.shield_radius
+            (scaled_shield_radius, scaled_shield_radius), 
+            scaled_shield_radius
         )
         
         # Add a thinner border/outline for better visibility
@@ -185,18 +216,18 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         pg.draw.circle(
             self.shield_surface,
             (*self.shield_color, 255),  # Fully opaque for the border
-            (self.shield_radius, self.shield_radius),
-            self.shield_radius,
+            (scaled_shield_radius, scaled_shield_radius),
+            scaled_shield_radius,
             border_width
         )
         
         # Add inner highlight for more visual flair - use same color but lighter
-        inner_radius = int(self.shield_radius * 0.7)
+        inner_radius = int(scaled_shield_radius * 0.7)
         inner_color = tuple(min(c + 60, 255) for c in self.shield_color)  # Lighten color
         pg.draw.circle(
             self.shield_surface,
             (*inner_color, 100),  # Semi-transparent for the inner highlight
-            (self.shield_radius, self.shield_radius),
+            (scaled_shield_radius, scaled_shield_radius),
             inner_radius
         )
 

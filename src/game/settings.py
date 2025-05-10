@@ -16,6 +16,13 @@ BG_SIZE = (FULL_WIDTH, HEIGHT)
 ORIGIN = (0,0)
 FPS = 60  # Melee runs at exactly 60 FPS
 
+# Character scaling
+CHARACTER_SCALE = 2.0  # Base character scale (default is 2x)
+
+# GIANT MODE settings
+GIANT_MODE_ENABLED = False  # Set to True to enable GIANT MODE by default
+GIANT_MODE_SCALE_FACTOR = 1.75  # Makes characters 1.75x larger than normal
+
 # game statuses
 INTRO = 0
 GUIDE = 1
