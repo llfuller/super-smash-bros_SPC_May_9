@@ -78,8 +78,13 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         # Keep the original acceleration value
         self.acce = acceleration
         
-        # Position and movement
-        self.pos = vec(pos[0], pos[1])  # Convert to Vector2 for consistency
+        # Store original position
+        self.original_pos = vec(pos[0], pos[1])
+        
+        # Initialize position vector - we'll update this after scaling
+        self.pos = vec(pos[0], pos[1])
+        
+        # Movement state initialization
         self.direc = direc
         self.walk_c = walk_c if walk_c is not None else 0
         self.move = move
@@ -130,7 +135,7 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         self.shield_broken = False
         self.shield_cooldown = 0  # Cooldown after shield break
         
-        # Graphics - scale all images to 2x size
+        # Graphics - scale all images to appropriate size
         self.walkR = [self.scale_image(img) for img in images_walk_r]
         self.walkL = [self.scale_image(img) for img in images_walk_l]
         self.standR = self.scale_image(image_stand_r)
@@ -154,8 +159,23 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
             
         self.rect = self.image.get_rect()
         
-        # Important: Set midbottom instead of center to ensure character stands on platforms
-        self.rect.midbottom = self.pos
+        # CRITICAL FIX: When in GIANT_MODE, we need to adjust the midbottom position directly
+        # to account for the larger sprite size
+        self.giant_mode = getattr(sys.modules['settings'], 'GIANT_MODE_ENABLED', False)
+        if self.giant_mode:
+            # In giant mode, position the feet at the original position
+            print(f"GIANT FIX: Adjusting position for {name}")
+            print(f"Original position: {self.pos}, Rect: {self.rect}")
+            
+            # Set position directly
+            self.rect.midbottom = (self.pos.x, self.pos.y)
+            # Now update pos to match the rect's midbottom
+            self.pos.x, self.pos.y = self.rect.midbottom
+            
+            print(f"Adjusted position: {self.pos}, Rect midbottom: {self.rect.midbottom}")
+        else:
+            # Standard positioning - use midbottom
+            self.rect.midbottom = (self.pos.x, self.pos.y)
         
         self.vel = vec(0, 0)
         self.acc = vec(0, 0)
@@ -188,48 +208,43 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         if getattr(sys.modules['settings'], 'GIANT_MODE_ENABLED', False):
             giant_scale = getattr(sys.modules['settings'], 'GIANT_MODE_SCALE_FACTOR', 1.75)
             scale_factor *= giant_scale
+            print(f"GIANT MODE scale factor: {scale_factor}")
         
         new_width = int(current_width * scale_factor)
         new_height = int(current_height * scale_factor)
+        
+        # Debug output for scaling
+        if getattr(sys.modules['settings'], 'GIANT_MODE_ENABLED', False):
+            print(f"Scaling image from {current_width}x{current_height} to {new_width}x{new_height}")
+            
         return pg.transform.scale(image, (new_width, new_height))
 
     def create_shield_surface(self):
         """Create the shield surface with the character's color"""
         # Get scaled shield size based on GIANT MODE setting
-        scaled_shield_size = get_shield_size()
-        scaled_shield_radius = scaled_shield_size // 2
+        shield_size = SHIELD_SIZE
         
-        self.shield_surface = pg.Surface((scaled_shield_size, scaled_shield_size), pg.SRCALPHA)
-        self.shield_radius = scaled_shield_radius
+        # Apply GIANT MODE scaling if enabled in settings
+        if getattr(sys.modules['settings'], 'GIANT_MODE_ENABLED', False):
+            giant_scale = getattr(sys.modules['settings'], 'GIANT_MODE_SCALE_FACTOR', 1.75)
+            shield_size = int(shield_size * giant_scale)
+            print(f"Giant mode shield size: {shield_size}")
         
-        # Draw the shield circle with a more visible glow effect
-        # Inner circle (more opaque)
+        # Create transparent surface for shield
+        self.shield_surface = pg.Surface((shield_size, shield_size), pg.SRCALPHA)
+        shield_radius = shield_size // 2
+        
+        # Draw the shield as a circle
         pg.draw.circle(
             self.shield_surface, 
-            (*self.shield_color, SHIELD_ALPHA),  # RGBA color with transparency
-            (scaled_shield_radius, scaled_shield_radius), 
-            scaled_shield_radius
+            (*self.shield_color, SHIELD_ALPHA), 
+            (shield_radius, shield_radius), 
+            shield_radius
         )
         
-        # Add a thinner border/outline for better visibility
-        border_width = 2  # Thinner border (was 3)
-        pg.draw.circle(
-            self.shield_surface,
-            (*self.shield_color, 255),  # Fully opaque for the border
-            (scaled_shield_radius, scaled_shield_radius),
-            scaled_shield_radius,
-            border_width
-        )
-        
-        # Add inner highlight for more visual flair - use same color but lighter
-        inner_radius = int(scaled_shield_radius * 0.7)
-        inner_color = tuple(min(c + 60, 255) for c in self.shield_color)  # Lighten color
-        pg.draw.circle(
-            self.shield_surface,
-            (*inner_color, 100),  # Semi-transparent for the inner highlight
-            (scaled_shield_radius, scaled_shield_radius),
-            inner_radius
-        )
+        # Debug info
+        if getattr(self.game, 'shield_debug', False):
+            print(f"Created shield for {self.name}: size={shield_size}, color={self.shield_color}")
 
     def jump(self, is_short_hop=False):
         # Debug info to see if this function is getting called
@@ -785,71 +800,62 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
                 self.image = self.standR
                 
     def draw(self, surface):
-        """Draw the character and shield if active"""
-        # First draw the character sprite
+        """Draw the character and shield"""
+        # Draw the character
         surface.blit(self.image, self.rect)
         
-        # Debug output - only log every 60 frames or when state changes
-        should_log = False
-        if hasattr(self.game, 'current_frame'):
-            if self.game.current_frame % 60 == 0:  # Only log every 60 frames (~1 second)
-                should_log = True
-        
-        # Track shield state change for logging
-        last_shield_state = getattr(self, '_last_shield_state', None)
-        current_shield_state = (self.shield_active, self.shield_broken)
-        self._last_shield_state = current_shield_state
-        
-        if last_shield_state != current_shield_state:
-            should_log = True  # Log on state change
-        
-        # Draw shield if active - moved this after character drawing for better visibility
+        # Draw shield if active
         if self.shield_active and not self.shield_broken:
-            if should_log and hasattr(self.game, 'shield_debug') and self.game.shield_debug:
-                print(f"DEBUG: Drawing shield for {self.name} at position {self.rect.center}")
+            # Position shield at center of character
+            shield_pos = self.rect.center
             
-            # Make sure shield surface exists
-            if self.shield_surface is None:
-                print(f"DEBUG: Shield surface was None, recreating for {self.name}")
-                self.create_shield_surface()
+            # Create shield surface
+            if getattr(sys.modules['settings'], 'GIANT_MODE_ENABLED', False):
+                # Adjust shield size and position for giant mode
+                giant_scale = getattr(sys.modules['settings'], 'GIANT_MODE_SCALE_FACTOR', 1.75)
+                shield_size = int(SHIELD_SIZE * giant_scale)
+                shield_surface = pg.Surface((shield_size, shield_size), pg.SRCALPHA)
+                shield_radius = shield_size // 2
+            else:
+                # Regular shield
+                shield_surface = pg.Surface((SHIELD_SIZE, SHIELD_SIZE), pg.SRCALPHA)
+                shield_radius = SHIELD_SIZE // 2
             
-            # Position shield around character's center
-            shield_rect = self.shield_surface.get_rect()
-            shield_rect.center = self.rect.center
+            # Draw shield circle
+            pg.draw.circle(
+                shield_surface, 
+                (*self.shield_color, SHIELD_ALPHA), 
+                (shield_radius, shield_radius), 
+                shield_radius
+            )
             
-            # Draw shield
-            surface.blit(self.shield_surface, shield_rect)
+            # Position shield centered on character
+            shield_rect = shield_surface.get_rect(center=shield_pos)
+            surface.blit(shield_surface, shield_rect)
             
-            # Draw shield health indicator (optional)
-            if hasattr(self, 'shield_health') and SHIELD_DURATION > 0:
-                # Calculate shield health percentage
-                shield_percent = self.shield_health / SHIELD_DURATION
-                
-                # Draw a small health bar above the shield
-                bar_width = 30
-                bar_height = 3
-                bar_x = shield_rect.centerx - bar_width // 2
-                bar_y = shield_rect.top - 8
-                
-                # Background (gray)
-                pg.draw.rect(surface, (80, 80, 80), (bar_x, bar_y, bar_width, bar_height))
-                
-                # Health (green to red based on health)
-                health_width = int(bar_width * shield_percent)
-                if shield_percent > 0.7:
-                    health_color = (0, 255, 0)  # Green
-                elif shield_percent > 0.3:
-                    health_color = (255, 255, 0)  # Yellow
-                else:
-                    health_color = (255, 0, 0)  # Red
-                    
-                pg.draw.rect(surface, health_color, (bar_x, bar_y, health_width, bar_height))
-        elif self.shield_active and should_log and hasattr(self.game, 'shield_debug') and self.game.shield_debug:
-            # If shield is active but broken, only log occasionally
-            print(f"DEBUG: Shield is active but broken for {self.name}")
-        elif self.move == SHIELD and should_log and hasattr(self.game, 'shield_debug') and self.game.shield_debug:
-            # If move is shield but shield_active is False, only log occasionally
-            print(f"DEBUG: Move is SHIELD but shield_active is False for {self.name}")
+            # Debug output for shield positioning
+            if self.game.shield_debug:
+                # Draw edge rectangle around shield
+                pg.draw.rect(surface, (255, 0, 0), shield_rect, 1)
+                # Print shield info if this is player 1
+                if self.name == self.game.player_names[0]:
+                    shield_info = f"Shield: {shield_pos}, size: {SHIELD_SIZE}"
+                    font = pg.font.SysFont('Arial', 12)
+                    text = font.render(shield_info, True, (255, 255, 255))
+                    surface.blit(text, (10, 10))
+        
+        # Draw debug info if needed (bounding box)
+        if self.game.controller_debug:
+            # Draw the rectangle outline for collision debugging
+            pg.draw.rect(surface, (255, 0, 0), self.rect, 2)
+            
+            # Draw position dot
+            pg.draw.circle(surface, (0, 255, 0), (int(self.pos.x), int(self.pos.y)), 3)
+            
+            # Draw damage percentage
+            font = pg.font.SysFont('Arial', 14)
+            damage_text = font.render(f"{self.damage_percent:.1f}%", True, (255, 0, 0))
+            surface.blit(damage_text, (self.rect.x, self.rect.y - 20))
             
     def can_move(self):
         """Check if character can be controlled by movement inputs"""
