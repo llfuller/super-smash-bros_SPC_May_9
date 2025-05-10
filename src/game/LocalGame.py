@@ -165,16 +165,8 @@ class KeyboardController:
             if not sprite.in_air:
                 player_data['move'] = WALK
             
-            # Make sure walk_c doesn't go out of bounds (only update on ground)
-            if not sprite.in_air:
-                walk_count = getattr(sprite, 'walk_c', 0)
-                if hasattr(sprite, 'walkL'):
-                    max_walk = len(sprite.walkL) - 1
-                    sprite.walk_c = (walk_count + 1) % max(1, max_walk)
-                else:
-                    sprite.walk_c = (walk_count + 1) % 8
-                    
-                player_data['walk_c'] = str(sprite.walk_c)
+            # Don't manually update animation counter - let the sprite's update_sprite_image handle it
+            player_data['walk_c'] = str(sprite.walk_c)
         
         # Move right
         elif keys[self.right_key] and float(player_data['xPos']) < GAME_WIDTH-40:
@@ -200,16 +192,8 @@ class KeyboardController:
             if not sprite.in_air:
                 player_data['move'] = WALK
             
-            # Make sure walk_c doesn't go out of bounds (only update on ground)
-            if not sprite.in_air:
-                walk_count = getattr(sprite, 'walk_c', 0)
-                if hasattr(sprite, 'walkR'):
-                    max_walk = len(sprite.walkR) - 1
-                    sprite.walk_c = (walk_count + 1) % max(1, max_walk)
-                else:
-                    sprite.walk_c = (walk_count + 1) % 8
-                    
-                player_data['walk_c'] = str(sprite.walk_c)
+            # Don't manually update animation counter - let the sprite's update_sprite_image handle it
+            player_data['walk_c'] = str(sprite.walk_c)
         else:
             # No horizontal input, slow down (apply friction)
             sprite.vel.x *= 0.8  # Apply friction to gradually stop
@@ -465,6 +449,11 @@ class LocalGame:
                         sprite.vel.x = 0
                         sprite.vel.y = 0
                         
+                        # Reset damage percentage to 0% on respawn
+                        sprite.damage_percent = 0.0
+                        player_data['damage_percent'] = '0'
+                        print(f"Reset {name}'s damage to 0%")
+                        
                         # Ensure we clear any saved ground position
                         if hasattr(sprite, 'last_ground_y'):
                             sprite.last_ground_y = None
@@ -476,9 +465,16 @@ class LocalGame:
                         player_data['xPos'] = str(sprite.pos.x)
                         player_data['yPos'] = str(sprite.pos.y)
                         
-                        # Add damage when falling off
-                        sprite.damage_percent += 10  # 10% damage for falling
-                        player_data['damage_percent'] = str(sprite.damage_percent)
+                        # Reset hitstun and other combat states
+                        sprite.hitstun_frames = 0
+                        sprite.tumble_state = False
+                        if hasattr(sprite, 'is_knockback_air'):
+                            sprite.is_knockback_air = False
+                        
+                        # Reset animation states
+                        sprite.animation_locked = False
+                        sprite.move = STAND
+                        player_data['move'] = STAND
                     
                     # Check if we need to initialize the character on a platform
                     # This helps prevent the initial falling through platforms issue
@@ -958,6 +954,10 @@ class LocalGame:
         # Reset player states from initial state
         self.players = copy.deepcopy(self.init_players)
         
+        # Make sure damage percent is reset to 0 for all players
+        for name, player_data in self.players.items():
+            player_data['damage_percent'] = '0'  # Explicitly set to 0%
+        
         # Reset sprite groups
         self.enemy_sprites = pg.sprite.Group()
         self.all_sprites = pg.sprite.Group()
@@ -966,6 +966,12 @@ class LocalGame:
         
         # Create character sprites with reset values
         self.createCharacterSprites()
+        
+        # Double-check that all sprites have 0% damage
+        for name, player_data in self.players.items():
+            if 'sprite' in player_data:
+                player_data['sprite'].damage_percent = 0.0
+                print(f"Confirmed {name}'s damage reset to 0%")
         
         # Reset game state
         self.showed_end = False

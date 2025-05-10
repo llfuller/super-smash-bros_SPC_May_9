@@ -317,9 +317,44 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         
         # Apply vertical movement - gravity when in air
         if self.in_air:
-            # Apply gravity - a constant value rather than physics calculation
-            self.acc.y = 0.5  # Constant gravity
-            self.vel.y += self.acc.y  # Accumulate gravity
+            # Check if we are in hitstun
+            in_hitstun = hasattr(self, 'hitstun_frames') and self.hitstun_frames > 0
+            
+            if in_hitstun:
+                # Track initial hitstun duration if this is a new hitstun state
+                if not hasattr(self, 'initial_hitstun'):
+                    self.initial_hitstun = self.hitstun_frames
+                
+                # Calculate gravity scale based on hitstun progress
+                # 0 = no gravity, 1 = full gravity
+                hitstun_progress = 1.0 - (self.hitstun_frames / max(1, self.initial_hitstun))
+                
+                # Gradually turn on gravity starting from the middle of hitstun
+                if hitstun_progress < 0.5:
+                    # First half of hitstun - no gravity
+                    gravity_scale = 0.0
+                else:
+                    # Second half - linearly interpolate from 0 to 1
+                    # Map 0.5-1.0 to 0.0-1.0
+                    gravity_scale = (hitstun_progress - 0.5) * 2.0
+                
+                # Apply scaled gravity
+                if gravity_scale > 0:
+                    scaled_gravity = 0.5 * gravity_scale  # Base gravity * scale
+                    self.vel.y += scaled_gravity
+                    
+                    # Debug output occasionally
+                    if self.game.current_frame % 20 == 0:
+                        print(f"HITSTUN DEBUG: {self.name} hitstun progress: {hitstun_progress:.2f}, gravity scale: {gravity_scale:.2f}")
+            else:
+                # Normal gravity when not in hitstun
+                # Reset initial hitstun tracking
+                if hasattr(self, 'initial_hitstun'):
+                    delattr(self, 'initial_hitstun')
+                
+                # Apply full gravity
+                self.acc.y = 0.5  # Constant gravity
+                self.vel.y += self.acc.y  # Accumulate gravity
             
             # Cap falling speed to prevent excessive velocity
             if self.vel.y > 10:
@@ -557,21 +592,19 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         # Animation frame counter for controlling animation speed
         self.animation_frame_counter += 1
         
-        # Slow down walk animations by 4x (update every 20 frames instead of 5)
-        # For other animations, keep the normal speed (every 5 frames)
-        should_update_walk = self.animation_frame_counter % 20 == 0
-        should_update_other = self.animation_frame_counter % 5 == 0
+        # Update walk animations at a normal speed (every 5 frames - same as other animations)
+        should_update = self.animation_frame_counter % 5 == 0
         
         if self.move == WALK:
             if self.direc == LEFT:
-                # Only update walk_c when should_update_walk is True (4x slower)
-                if should_update_walk:
+                # Only update walk_c when should_update is True
+                if should_update:
                     max_walk = len(self.walkL) - 1
                     self.walk_c = (self.walk_c + 1) % max(1, max_walk)
                 self.image = self.walkL[min(self.walk_c, len(self.walkL)-1)]
             elif self.direc == RIGHT:
-                # Only update walk_c when should_update_walk is True (4x slower)
-                if should_update_walk:
+                # Only update walk_c when should_update is True
+                if should_update:
                     max_walk = len(self.walkR) - 1
                     self.walk_c = (self.walk_c + 1) % max(1, max_walk)
                 self.image = self.walkR[min(self.walk_c, len(self.walkR)-1)]

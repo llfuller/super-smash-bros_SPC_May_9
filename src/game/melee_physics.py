@@ -184,6 +184,10 @@ def knockback_to_velocity(knockback, angle_degrees=45):
     vx = speed * math.cos(angle_radians)
     vy = -speed * math.sin(angle_radians)  # Negative because y is down in PyGame
     
+    # Note: The character update loop now handles gradual gravity reintroduction
+    # during hitstun. Gravity is disabled for the first half of hitstun, then
+    # gradually increases from 0 to full during the second half.
+    
     return (vx, vy)
 
 # Function to calculate hitstun frames
