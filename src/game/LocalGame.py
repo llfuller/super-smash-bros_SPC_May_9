@@ -30,12 +30,18 @@ from objects.Platform import Platform
 from settings import *
 from images import *
 from platform_layouts import get_layout  # Import the platform layouts
+from config import PRO_CONTROLLER, DEFAULT_SETTINGS  # Import Pro Controller config
+from input_handler import input_handler, INTENTS  # Import unified input handler
+from player_controller import PlayerController  # Import the player controller
 
 # Add missing color
 YELLOW = (255, 255, 0)
 
 # Vector utility
 vec = pg.math.Vector2
+
+# Add debug mode for controller mapping
+CONTROLLER_DEBUG = False  # Set to True to enable controller debug output
 
 print()
 print('========== SUPER SMASH BROS - Local Two-Player Edition ==========')
@@ -50,172 +56,6 @@ print('- Z: Weak attack                  - G: Weak attack')
 print('- X: Heavy attack                 - H: Heavy attack')
 print()
 print('UPDATES (errors will show up here if ever):')
-
-# Controller class to abstract keyboard input
-class KeyboardController:
-    def __init__(self, up_key, left_key, right_key, down_key, weak_key, heavy_key, player_name):
-        self.up_key = up_key
-        self.left_key = left_key
-        self.right_key = right_key
-        self.down_key = down_key  # Add down key for platform drop-through and fast fall
-        self.weak_key = weak_key
-        self.heavy_key = heavy_key
-        self.player_name = player_name
-    
-    def check_attack_key(self, event, game):
-        """Check if attack keys were pressed and perform the corresponding action"""
-        if event.type == pg.KEYDOWN:
-            # Weak attack
-            if event.key == self.weak_key:
-                if self.player_name in game.players and 'sprite' in game.players[self.player_name]:
-                    game.players[self.player_name]['sprite'].weakAttack()
-                    return True
-            
-            # Heavy attack
-            elif event.key == self.heavy_key:
-                if self.player_name in game.players and 'sprite' in game.players[self.player_name]:
-                    game.players[self.player_name]['sprite'].heavyAttack()
-                    return True
-        
-        return False
-    
-    def handle_movement(self, keys, game):
-        """Handle movement controls for the player"""
-        if self.player_name not in game.players or 'sprite' not in game.players[self.player_name]:
-            return
-            
-        player_data = game.players[self.player_name]
-        sprite = player_data['sprite']
-        
-        # Don't process movement if player is dead or game is not in play
-        if sprite.damage_percent >= 999 or not game.playing:
-            return
-            
-        # EMERGENCY FIX: Reset any problematic state
-        # Ensure sprite has correct attributes
-        if not hasattr(sprite, 'vel'):
-            sprite.vel = vec(0, 0)
-        if not hasattr(sprite, 'acc'):
-            sprite.acc = vec(0, 0)
-        
-        # Reset movement flags (these will be updated based on input)
-        sprite.moving_left = False
-        sprite.moving_right = False
-        
-        # Optional debug output
-        if hasattr(game, 'current_frame') and game.current_frame % 60 == 0:
-            # Print state once per second
-            print(f"{self.player_name} state: in_air={sprite.in_air}, pos=({sprite.pos.x:.1f}, {sprite.pos.y:.1f}), vel=({sprite.vel.x:.1f}, {sprite.vel.y:.1f})")
-        
-        # Check for drop-through platform input
-        if keys[self.down_key]:
-            # Set flag on sprite for dropping through platforms
-            sprite.drop_through = True
-            
-            # Check for fast fall (only in air and after apex of jump)
-            if sprite.in_air and sprite.vel.y > 0:
-                sprite.is_fast_falling = True
-        else:
-            # Clear the flag when key is released
-            sprite.drop_through = False
-            sprite.is_fast_falling = False
-        
-        # Check for jump input - use key down to allow one jump at a time
-        if keys[self.up_key] and not sprite.is_jumping and not sprite.in_air and not sprite.animation_locked:
-            sprite.jump()
-            
-            # After jumping, temporarily prevent re-jumping until key is released
-            # This is handled by the sprite's in_air flag
-        
-        # Check if character can be controlled (not in middle of animation)
-        if not hasattr(sprite, 'can_move') or not sprite.can_move():
-            # Still update player data from sprite to ensure synchronized state
-            player_data['xPos'] = str(sprite.pos.x)
-            player_data['yPos'] = str(sprite.pos.y)
-            player_data['direc'] = sprite.direc
-            player_data['walk_c'] = str(sprite.walk_c)
-            player_data['move'] = sprite.move
-            return
-        
-        # Track if we're moving horizontally this frame
-        is_moving_horizontally = False
-        
-        # HORIZONTAL MOVEMENT - with different behavior in air vs ground
-        # Move left
-        if keys[self.left_key] and float(player_data['xPos']) > 40:
-            is_moving_horizontally = True
-            
-            # Set direction for animations
-            sprite.direc = LEFT
-            
-            if sprite.in_air:
-                # Air control is more limited
-                sprite.vel.x = max(sprite.vel.x - 0.2, -2)  # Slower horizontal air movement
-            else:
-                # Ground movement is faster
-                sprite.vel.x = -3  # Normal ground speed
-                sprite.move = WALK
-            
-            # Update flags for animation and physics
-            sprite.moving_left = True
-            sprite.moving_right = False
-            
-            # Update player data
-            player_data['direc'] = LEFT
-            if not sprite.in_air:
-                player_data['move'] = WALK
-            
-            # Don't manually update animation counter - let the sprite's update_sprite_image handle it
-            player_data['walk_c'] = str(sprite.walk_c)
-        
-        # Move right
-        elif keys[self.right_key] and float(player_data['xPos']) < GAME_WIDTH-40:
-            is_moving_horizontally = True
-            
-            # Set direction for animations
-            sprite.direc = RIGHT
-            
-            if sprite.in_air:
-                # Air control is more limited
-                sprite.vel.x = min(sprite.vel.x + 0.2, 2)  # Slower horizontal air movement
-            else:
-                # Ground movement is faster
-                sprite.vel.x = 3  # Normal ground speed
-                sprite.move = WALK
-            
-            # Update flags for animation and physics
-            sprite.moving_right = True
-            sprite.moving_left = False
-            
-            # Update player data
-            player_data['direc'] = RIGHT
-            if not sprite.in_air:
-                player_data['move'] = WALK
-            
-            # Don't manually update animation counter - let the sprite's update_sprite_image handle it
-            player_data['walk_c'] = str(sprite.walk_c)
-        else:
-            # No horizontal input, slow down (apply friction)
-            sprite.vel.x *= 0.8  # Apply friction to gradually stop
-            if abs(sprite.vel.x) < 0.1:
-                sprite.vel.x = 0  # Stop completely when very slow
-        
-        # If not moving horizontally and not in air, reset to standing
-        if not is_moving_horizontally and not sprite.in_air:
-            sprite.walk_c = 0
-            
-            # Only transition to STAND if not in another animation
-            if sprite.move == WALK:
-                sprite.move = STAND
-                player_data['move'] = STAND
-                
-            player_data['walk_c'] = '0'
-        
-        # Update player data from sprite position
-        player_data['xPos'] = str(sprite.pos.x)
-        player_data['yPos'] = str(sprite.pos.y)
-        
-        # Update collision rectangle - let sprite's update handle platform collision
 
 class LocalGame:
     # ========================= IMPORTANT METHODS =========================
@@ -239,6 +79,10 @@ class LocalGame:
         
         # Emergency recovery counter for movement issues
         self.emergency_fix_applied = False
+        
+        # Controller debugging
+        self.controller_debug = False  # Can be toggled with F1
+        self.last_controller_debug = 0
         
         # player variables
         self.player_names = ["", ""]  # player1, player2
@@ -270,26 +114,101 @@ class LocalGame:
         # Required for menu compatibility
         self.curr_player = ""  # updated during character selection
         
-        # Auto player 2 setup
-        self.auto_player2 = True  # Flag to enable/disable auto-setup of player 2
+        # Game settings
+        self.settings = DEFAULT_SETTINGS.copy()
+        self.auto_player2 = self.settings['auto_player2']  # Flag to enable/disable auto-setup of player 2
         
         # Setup controllers
         self.controllers = {}
         # Controllers will be fully initialized after player names are set
+        
+        # Initialize controller if enabled
+        if self.settings['use_controller']:
+            # Initialize pygame's joystick module
+            if not pg.joystick.get_init():
+                pg.joystick.init()
+                
+            # Check if joysticks are available
+            if pg.joystick.get_count() > 0:
+                print(f"Found {pg.joystick.get_count()} controller(s):")
+                for i in range(pg.joystick.get_count()):
+                    joy = pg.joystick.Joystick(i)
+                    joy.init()
+                    print(f"  {i}: {joy.get_name()}")
+            else:
+                print("No controllers found. Using keyboard controls only.")
+                self.settings['use_controller'] = False
 
     def _setup_controllers(self):
         """Initialize controllers with player names after they are defined"""
+        print("\nSetting up controllers...")
+        
+        # Reset controllers dictionary before adding new ones
+        self.controllers = {}
+        
+        # Make sure input handler controller flag is correctly set
+        if self.settings['use_controller']:
+            input_handler.controller_enabled = True
+            print(f"Controller support is enabled in settings: {self.settings['use_controller']}")
+            print(f"Controller support in input handler: {input_handler.controller_enabled}")
+        
+        # Add players to the input handler
         if self.player_names[0]:
-            # Player 1: Arrow keys and Z/X for attacks
-            self.controllers[self.player_names[0]] = KeyboardController(
-                pg.K_UP, pg.K_LEFT, pg.K_RIGHT, pg.K_DOWN, pg.K_z, pg.K_x, self.player_names[0]
-            )
+            # Initialize input handler for this player
+            input_handler.add_player(self.player_names[0], is_player_one=True)
+            input_handler.set_debug(self.controller_debug)
+
+            # Create Player 1 controller
+            try:
+                # Get sprite if available
+                sprite = None
+                if self.player_names[0] in self.players and 'sprite' in self.players[self.player_names[0]]:
+                    sprite = self.players[self.player_names[0]]['sprite']
+                
+                # Create controller
+                self.controllers[self.player_names[0]] = PlayerController(
+                    self.player_names[0],
+                    self.players[self.player_names[0]],
+                    sprite
+                )
+                print(f"Player 1 controller created for {self.player_names[0]}")
+                
+                # Reinitialize controller if enabled
+                if self.settings['use_controller']:
+                    controller_id = 0  # First controller
+                    if input_handler.init_controller(self.player_names[0], controller_id):
+                        print(f"Controller successfully initialized for Player 1 ({self.player_names[0]})")
+                    else:
+                        print(f"Failed to initialize controller for Player 1")
+            except Exception as e:
+                print(f"Error creating Player 1 controller: {e}")
+                import traceback
+                traceback.print_exc()
         
         if self.player_names[1]:
-            # Player 2: WASD and G/H for attacks
-            self.controllers[self.player_names[1]] = KeyboardController(
-                pg.K_w, pg.K_a, pg.K_d, pg.K_s, pg.K_g, pg.K_h, self.player_names[1]
-            )
+            # Initialize input handler for this player
+            input_handler.add_player(self.player_names[1], is_player_one=False)
+            
+            # Create Player 2 controller
+            try:
+                # Get sprite if available
+                sprite = None
+                if self.player_names[1] in self.players and 'sprite' in self.players[self.player_names[1]]:
+                    sprite = self.players[self.player_names[1]]['sprite']
+                
+                # Create controller
+                self.controllers[self.player_names[1]] = PlayerController(
+                    self.player_names[1],
+                    self.players[self.player_names[1]],
+                    sprite
+                )
+                print(f"Player 2 controller created for {self.player_names[1]}")
+            except Exception as e:
+                print(f"Error creating Player 2 controller: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        print("Controllers setup complete\n")
 
     def run(self):
         # check for the current menu depending on the status
@@ -345,8 +264,6 @@ class LocalGame:
 
     def events(self):
         try:
-            keys = pg.key.get_pressed()
-
             # once player enters game screen - show initial chat
             if not self.chat_init:
                 self.chat_text = 'Game started! Good luck!'
@@ -361,8 +278,8 @@ class LocalGame:
                         sprite = player_data['sprite']
                         # Reset physics to safe state
                         sprite.in_air = False
-                        sprite.vel = vec(0, 0)
-                        sprite.acc = vec(0, 0)
+                        sprite.vel = pg.math.Vector2(0, 0)
+                        sprite.acc = pg.math.Vector2(0, 0)
                         
                         # Find a safe platform to position on
                         for platform in self.platforms:
@@ -371,7 +288,104 @@ class LocalGame:
                                 sprite.last_ground_y = sprite.pos.y
                                 break
 
-            for event in pg.event.get():
+            # Controller debug output
+            if self.controller_debug and self.current_frame - self.last_controller_debug > 60:
+                self.last_controller_debug = self.current_frame
+                # Check for joysticks
+                if pg.joystick.get_count() > 0:
+                    joy = pg.joystick.Joystick(0)
+                    print(f"\nController Debug (frame {self.current_frame}):")
+                    print(f"Controller name: {joy.get_name()}")
+                    print(f"Axes: {joy.get_numaxes()}, Buttons: {joy.get_numbuttons()}, Hats: {joy.get_numhats()}")
+                    
+                    # Print axis values
+                    print("Axes:", end=" ")
+                    for i in range(joy.get_numaxes()):
+                        print(f"{i}:{joy.get_axis(i):.2f}", end=" ")
+                    
+                    # Print button states
+                    print("\nButtons:", end=" ")
+                    any_pressed = False
+                    for i in range(joy.get_numbuttons()):
+                        if joy.get_button(i):
+                            print(f"{i}:PRESSED", end=" ")
+                            any_pressed = True
+                    if not any_pressed:
+                        print("None pressed", end=" ")
+                    
+                    # Print hat states
+                    print("\nHats:", end=" ")
+                    for i in range(joy.get_numhats()):
+                        hat_val = joy.get_hat(i)
+                        if hat_val != (0, 0):
+                            print(f"{i}:{hat_val}", end=" ")
+                        else:
+                            print(f"{i}:centered", end=" ")
+                    print()
+                    
+                    # Print controller initialization status in input_handler
+                    print("Controller status in input_handler:")
+                    print(f"- controller_enabled: {input_handler.controller_enabled}")
+                    for player_name in self.player_names:
+                        if player_name in input_handler.controllers:
+                            controller = input_handler.controllers[player_name]
+                            print(f"- {player_name}: Connected={controller['connected']}, ID={controller['id']}")
+                        else:
+                            print(f"- {player_name}: No controller attached")
+                    
+                    # Add debug info about active intents
+                    print("--- Active Intents by Player ---")
+                    for player_name in self.player_names:
+                        if player_name:  # If player name is set
+                            active_intents = []
+                            
+                            # Check movement intents
+                            if input_handler.get_intent(player_name, INTENTS['MOVE_LEFT']):
+                                active_intents.append("MOVE_LEFT")
+                            if input_handler.get_intent(player_name, INTENTS['MOVE_RIGHT']):
+                                active_intents.append("MOVE_RIGHT")
+                            if input_handler.get_intent(player_name, INTENTS['MOVE_UP']):
+                                active_intents.append("MOVE_UP")
+                            if input_handler.get_intent(player_name, INTENTS['MOVE_DOWN']):
+                                active_intents.append("MOVE_DOWN")
+                                
+                            # Check attack intents
+                            if input_handler.get_intent(player_name, INTENTS['WEAK_ATTACK']):
+                                active_intents.append("WEAK_ATTACK")
+                            if input_handler.get_intent(player_name, INTENTS['HEAVY_ATTACK']):
+                                active_intents.append("HEAVY_ATTACK")
+                            
+                            # Print all active intents
+                            if active_intents:
+                                print(f"{player_name} active intents: {', '.join(active_intents)}")
+                            else:
+                                print(f"{player_name} has no active intents")
+                    
+                    # Print analog values for Player 1
+                    if self.player_names[0]:
+                        h_val = input_handler.get_analog_value(self.player_names[0], 'horizontal')
+                        v_val = input_handler.get_analog_value(self.player_names[0], 'vertical')
+                        print(f"Player 1 analog values: horizontal={h_val:.2f}, vertical={v_val:.2f}")
+                    print("-----------------------")
+
+            # Collect all events
+            events = pg.event.get()
+            
+            # Process inputs through the intent-based input handler
+            # Let the input handler gather keyboard state internally
+            input_handler.update(events)
+            
+            # Process each event directly (for quit events and debug toggle)
+            for event in events:
+                # Controller debug output for button presses
+                if self.controller_debug:
+                    if event.type == pg.JOYBUTTONDOWN:
+                        print(f"Controller Button Down: {event.button}")
+                    elif event.type == pg.JOYBUTTONUP:
+                        print(f"Controller Button Up: {event.button}")
+                    elif event.type == pg.JOYHATMOTION:
+                        print(f"Controller Hat Motion: {event.hat} Value: {event.value}")
+                
                 # check for closing window
                 if event.type == pg.QUIT:                    
                     print("You quit in the middle of the game!")
@@ -379,39 +393,43 @@ class LocalGame:
                     pg.quit()
                     quit()
 
-                # Handle all controllers for attack inputs
-                handled_attack = False
-                for controller in self.controllers.values():
-                    if controller.check_attack_key(event, self):
-                        handled_attack = True
-                        break
-                
-                # If the event wasn't handled as an attack, check other game controls
-                if not handled_attack and event.type == pg.KEYDOWN:
-                    # restart game after match ends
-                    if event.key == pg.K_r:
-                        if self.showed_end:
+                # Toggle controller debug mode with F1 key
+                if event.type == pg.KEYDOWN and event.key == pg.K_F1:
+                    self.controller_debug = not self.controller_debug
+                    input_handler.set_debug(self.controller_debug)
+                    print(f"Controller debug mode: {'ON' if self.controller_debug else 'OFF'}")
+
+            # Check for attack inputs from all players
+            for controller in self.controllers.values():
+                controller.check_attack_key(None, self)
+            
+            # Check for game control intents if end game screen is shown
+            if self.showed_end:
+                # Check intents from each player
+                for player_name in self.player_names:
+                    if player_name:  # If player name is set
+                        # Check restart intent
+                        if input_handler.is_intent_just_activated(player_name, INTENTS['RESTART']):
                             if not self.restart_request:
                                 self.restartGame()
                                 self.restart_request = True
                                 self.chat_messages.append('Game restarted!')
-                    
-                    # return to main menu
-                    elif event.key == pg.K_m:
-                        if self.showed_end:
+                        
+                        # Check menu intent
+                        if input_handler.is_intent_just_activated(player_name, INTENTS['MENU']):
                             self.quitToMainMenu()
-                    
-                    # quit game
-                    elif event.key == pg.K_q:
-                        if self.showed_end:
+                        
+                        # Check quit intent
+                        if input_handler.is_intent_just_activated(player_name, INTENTS['QUIT']):
                             print("Thank you for playing!")
                             self.running = False
                             pg.quit()
                             quit()
 
             # Handle movement for all players using their respective controllers
+            # Pass None instead of keys to enforce using only the intent system
             for controller in self.controllers.values():
-                controller.handle_movement(keys, self)
+                controller.handle_movement(None, self)
                 
         except Exception as e:
             print(f"Error: {e}")
@@ -754,6 +772,9 @@ class LocalGame:
             # Create the actual character sprites
             self.createCharacterSprites()
             
+            # Set up controllers with character sprites AFTER sprites are created
+            self._setup_controllers()
+            
             # Set game state
             self.status = GAME
             self.playing = True
@@ -808,8 +829,8 @@ class LocalGame:
                     player = character_class(self, name, 'alive', damage_percent, pos, d, w, m)
                     
                     # Initialize specific physics properties to ensure proper starting state
-                    player.vel = vec(0, 0)  # Start with no velocity
-                    player.acc = vec(0, 0)  # Start with no acceleration
+                    player.vel = pg.math.Vector2(0, 0)  # Start with no velocity
+                    player.acc = pg.math.Vector2(0, 0)  # Start with no acceleration
                     player.in_air = False   # Start on the ground
                     player.is_jumping = False
                     player.is_fast_falling = False
@@ -852,6 +873,11 @@ class LocalGame:
                     
                     # Add to sprite groups
                     self.all_sprites.add(player)
+                    
+                    # Update sprite reference in controller if it exists
+                    if name in self.controllers:
+                        self.controllers[name].set_sprite(player)
+                        print(f"Updated sprite reference in controller for {name}")
             
             # Clear the existing enemy_sprites group
             self.enemy_sprites.empty()
@@ -964,6 +990,10 @@ class LocalGame:
         self.platforms = pg.sprite.Group()
         self.loadPlatforms()
         
+        # Reset controllers
+        self.controllers = {}
+        self._setup_controllers()
+        
         # Create character sprites with reset values
         self.createCharacterSprites()
         
@@ -984,7 +1014,7 @@ class LocalGame:
         self.chat_messages = []
         self.chat_messages.append('=========== GAME RESTART ===========')
         self.chat_messages.append('Best of luck - may the best player win!')
-        self.chat_messages.append('======================================')
+        self.chat_messages.append('=======================================')
     
     def quitToMainMenu(self):
         # Reset game state

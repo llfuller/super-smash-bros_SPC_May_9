@@ -9,6 +9,8 @@ The game uses authentic Super Smash Bros Melee physics for realistic gameplay.
 
 import sys
 import os
+import pygame as pg
+import time
 
 # Simply use the current directory as the game directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -16,14 +18,59 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 # Just make sure we're in the game directory (already are, but to be safe)
 os.chdir(current_dir)
 
+# Initialize pygame to check for controllers
+pg.init()
+pg.joystick.init()
+
 print("=== Super Smash Bros - Local Two-Player Edition Launcher ===")
+print()
+
+# Check for controllers
+controller_found = False
+controller_name = "None"
+
+# Wait a moment for controller detection
+time.sleep(0.5)  # Give system time to detect controller
+
+# Try to initialize the controller
+if pg.joystick.get_count() > 0:
+    try:
+        joystick = pg.joystick.Joystick(0)
+        joystick.init()
+        controller_name = joystick.get_name()
+        controller_found = True
+        print(f"Switch Pro Controller detected: {controller_name}")
+        print("Controller will be used for Player 1.")
+    except Exception as e:
+        print(f"Controller detected but initialization failed: {e}")
+        print("Falling back to keyboard controls.")
+else:
+    print("No controllers detected. Using keyboard controls only.")
+    print("Troubleshooting:")
+    print("1. Make sure controller is connected before starting the game")
+    print("2. Try unplugging and reconnecting your controller")
+    print("3. Some controllers require specific drivers")
+    print("4. Press F1 in-game to see controller debug information")
+    print("5. Run controller_test.py to test your controller")
+
 print()
 print("Controls:")
 print("Player 1:")
-print("- Arrow keys: Movement")
-print("- DOWN: Fast fall (when already falling)")
-print("- Z: Weak attack")
-print("- X: Heavy attack")
+if controller_found:
+    print("- Left Stick/D-pad: Movement")
+    print("- Left Stick/D-pad DOWN: Fast fall (when already falling)")
+    print("- B button: Weak attack")
+    print("- Y button: Heavy attack")
+    print("- Plus button: Restart game (after match)")
+    print("- Minus button: Return to menu (after match)")
+    print("- Home button: Quit game (after match)")
+    print("- F1 key: Toggle controller debugging mode")
+else:
+    print("- Arrow keys: Movement")
+    print("- DOWN: Fast fall (when already falling)")
+    print("- Z: Weak attack")
+    print("- X: Heavy attack")
+
 print()
 print("Player 2:")
 print("- WASD keys: Movement")
@@ -39,8 +86,46 @@ print("- Accurate movement speeds and acceleration values")
 print()
 print("Starting the game...")
 
+# Import settings
+from config import DEFAULT_SETTINGS
+
+# Initialize the unified input handler
+from input_handler import input_handler
+
 # Since we're already in the game directory, import directly
 from LocalGame import LocalGame
 
+# Create a game instance
 game = LocalGame()
+
+# Enable controller support if a controller was found
+if controller_found:
+    # Enable controller in both game settings and input handler
+    game.settings['use_controller'] = True
+    
+    # IMPORTANT: Make sure the input handler knows controller is enabled
+    # This is the key flag that allows controller initialization when player1 is added
+    input_handler.controller_enabled = True
+    print(f"Controller support enabled in input handler: {input_handler.controller_enabled}")
+    
+    # Ensure controllers are prioritized over keyboard for input
+    input_handler.controller_priority = True
+    print("Controller input prioritized over keyboard input")
+    
+    print(f"Controller support enabled for {controller_name}")
+    
+    # We'll try to auto-detect the controller type
+    if "pro" in controller_name.lower() or "switch" in controller_name.lower():
+        print("Detected as Nintendo Switch Pro Controller")
+    elif "xbox" in controller_name.lower():
+        print("Detected as Xbox controller - button mappings may need adjustment")
+    elif "ps4" in controller_name.lower() or "playstation" in controller_name.lower():
+        print("Detected as PlayStation controller - button mappings may need adjustment")
+    else:
+        print("Unknown controller type - you may need to adjust button mappings in config.py")
+
+# Force debug mode to be on initially to help diagnose controller issues
+game.controller_debug = True
+print("Controller debug mode enabled by default - press F1 to toggle")
+
 game.new() 
