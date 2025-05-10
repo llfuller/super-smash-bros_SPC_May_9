@@ -1,0 +1,84 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "ArenaRewrite Mod Packet",
+    "type": "object",
+    "properties": {
+      "entities": {
+        "type": "array",
+        "maxItems": 64,
+        "items": {
+          "type": "object",
+          "required": ["id", "prefab"],
+          "properties": {
+            "id":    { "type": "string", "pattern": "^[A-Za-z0-9_]{1,32}$" },
+            "prefab":{ "type": "string", "enum": ["character","projectile","hazard","powerup","effect"] },
+            "components": { "type": "object", "additionalProperties": true },
+            "behaviors": {
+              "type": "array",
+              "maxItems": 6,
+              "items":{
+                "type": "object",
+                "required":["event","actions"],
+                "properties":{
+                  "event":{ "type":"string",
+                             "enum":["OnStart","EveryFrame","OnTimer","OnCollision",
+                                     "OnVoiceCommand","OnHealthBelow","OnDestroyed"]},
+                  "actions":{
+                    "type":"array",
+                    "maxItems":10,
+                    "items":{
+                      "type":"object",
+                      "required":["type"],
+                      "properties":{
+                        "type":{"type":"string",
+                                "enum":["Spawn","ApplyForce","ModifyStat","PlayAnimation",
+                                        "PlaySound","Destroy","SetTimer","Commentary"]},
+                        "prefab":{"type":"string"},
+                        "x":{"type":["number","string"]},
+                        "y":{"type":["number","string"]},
+                        "properties":{"type":"object"},
+                        "vector":{"type":"object",
+                                  "properties":{
+                                    "x":{"type":["number","string"]},
+                                    "y":{"type":["number","string"]}}},
+                        "field":{"type":"string"},
+                        "value":{"type":["number","string"]},
+                        "name":{"type":"string"},
+                        "cue":{"type":"string"},
+                        "id":{"type":"string"},
+                        "duration":{"type":"number","minimum":0.05,"maximum":30},
+                        "repeat":{"type":"integer","minimum":0,"maximum":100},
+                        "text":{"type":"string","maxLength":120}
+                      },
+                      "additionalProperties":false
+                    }
+                  }
+                },
+                "additionalProperties":false
+              }
+            }
+          },
+          "additionalProperties":false
+        }
+      },
+      "timers": {
+        "type": "array",
+        "items":{
+          "type":"object",
+          "required":["id","duration","on_complete"],
+          "properties":{
+            "id":{"type":"string","pattern":"^[A-Za-z0-9_]{1,32}$"},
+            "duration":{"type":"number","minimum":0.05,"maximum":30},
+            "repeat":{"type":"integer","minimum":0,"maximum":100},
+            "on_complete":{
+              "type":"array",
+              "items":{"$ref":"#/properties/entities/items/properties/behaviors/items/properties/actions/items"}
+            }
+          },
+          "additionalProperties":false
+        }
+      }
+    },
+    "additionalProperties":false
+  }
+  
