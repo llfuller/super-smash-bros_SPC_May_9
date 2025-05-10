@@ -14,8 +14,8 @@ from elevenlabs import generate, play, set_api_key
 from elevenlabs import voice as elevenlabs_voice
 
 # Set your API keys
-ELEVENLABS_API_KEY = "sk_912a9fff1d5557139bc8b8977d56083397b97571570a15af"
-OPENAI_API_KEY = "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"
+ELEVENLABS_API_KEY = ""
+OPENAI_API_KEY = ""
 
 # Initialize clients
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
