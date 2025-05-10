@@ -79,6 +79,12 @@ class LocalGame:
         self.restart_request = False  # checks if player requested for a restart
         self.current_frame = 0  # Track frames for debugging and timing
         
+        # Match events tracking system
+        self.match_events = []  # List to store high-impact events with timestamps
+        self.match_start_time = 0  # Time when match started (for event timestamps)
+        self.match_id = 0  # Counter for match IDs to name log files
+        self.match_saved = False  # Flag to check if current match has been saved
+        
         # Initialize entity system
         from entities.entities import DSL
         import sys
@@ -716,6 +722,9 @@ class LocalGame:
                 text_surface2 = font2.render(self.chat_messages[i], True, BLACK)
                 self.screen.blit(text_surface2, (730,95+(i*25)))
 
+            # Draw recent events
+            self.drawRecentEvents()
+
             pg.display.flip()
             
         except Exception as e:
@@ -893,38 +902,49 @@ class LocalGame:
     
     def startGame(self):
         # Only start if both players are ready
-        if self.player_statuses[0] == 'ready' and self.player_statuses[1] == 'ready':
-            print("====== Started Game! ======")
-            
-            # Position players
-            # Player 1 
-            self.players[self.player_names[0]]['xPos'] = '157'
-            self.players[self.player_names[0]]['yPos'] = '460'  # Match platform heights
-            self.players[self.player_names[0]]['direc'] = 'right'
-            
-            # Player 2
-            self.players[self.player_names[1]]['xPos'] = '534'
-            self.players[self.player_names[1]]['yPos'] = '460'  # Match platform heights
-            self.players[self.player_names[1]]['direc'] = 'left'
-            
-            # Create copy for restart
-            self.init_players = copy.deepcopy(self.players)
-            
-            # Create the actual character sprites
-            self.createCharacterSprites()
-            
-            # Set up controllers with character sprites AFTER sprites are created
-            self._setup_controllers()
-            
-            # Set game state
-            self.status = GAME
-            self.playing = True
-            self.initialized = True
-            
-            # Game start message
-            self.chat_messages.append('============ GAME START ============')
-            self.chat_messages.append('Best of luck - may the best player win!')
-            self.chat_messages.append('======================================')
+        if "ready" not in self.player_statuses or "unready" in self.player_statuses:
+            return False
+
+        # Clear previous match events and set start time
+        self.match_events = []
+        self.match_start_time = pg.time.get_ticks()
+        self.match_events.append({
+            "time": 0,
+            "type": "MATCH_START",
+            "message": "Match started!"
+        })
+        
+        print("====== Started Game! ======")
+        
+        # Position players
+        # Player 1 
+        self.players[self.player_names[0]]['xPos'] = '157'
+        self.players[self.player_names[0]]['yPos'] = '460'  # Match platform heights
+        self.players[self.player_names[0]]['direc'] = 'right'
+        
+        # Player 2
+        self.players[self.player_names[1]]['xPos'] = '534'
+        self.players[self.player_names[1]]['yPos'] = '460'  # Match platform heights
+        self.players[self.player_names[1]]['direc'] = 'left'
+        
+        # Create copy for restart
+        self.init_players = copy.deepcopy(self.players)
+        
+        # Create the actual character sprites
+        self.createCharacterSprites()
+        
+        # Set up controllers with character sprites AFTER sprites are created
+        self._setup_controllers()
+        
+        # Set game state
+        self.status = GAME
+        self.playing = True
+        self.initialized = True
+        
+        # Game start message
+        self.chat_messages.append('============ GAME START ============')
+        self.chat_messages.append('Best of luck - may the best player win!')
+        self.chat_messages.append('======================================')
     
     def createCharacterSprites(self):
         # Create sprites for both players
@@ -1064,30 +1084,49 @@ class LocalGame:
         # Check if there's a winner (one player with damage < 999%)
         alive_count = len(self.players)
         alive = ''
+        defeated_player = None
         
         for name, player_data in self.players.items():
             if 'sprite' in player_data:
                 sprite = player_data['sprite']
                 if sprite.is_defeated():
                     alive_count -= 1
+                    defeated_player = name
                 else:
                     alive = name
             else:
                 # Use player data if sprite not available
                 if float(player_data.get('damage_percent', 0)) >= 999:
                     alive_count -= 1
+                    defeated_player = name
                 else:
                     alive = name
         
         # If only one player is alive, they win
         if alive_count <= 1 and alive:
             self.winner = alive
+            
+            # Record KO event
+            if defeated_player:
+                self.record_event("KO", f"{alive} knocked out {defeated_player}! GAME!")
+                
+            # Save match events to log file
+            if not self.match_saved:
+                self.save_match_events()
+                self.match_saved = True
     
     def attackPlayer(self, player_name, damage, move, attacker_pos_x):
         # Process attack on a player
         try:
             # Find attacker
             attacker_pos_x = float(attacker_pos_x)
+            
+            # Get attacker name
+            attacker_name = None
+            for name in self.players:
+                if name != player_name:
+                    attacker_name = name
+                    break
             
             # Update damage in player data
             if player_name in self.players:
@@ -1112,14 +1151,40 @@ class LocalGame:
                                     sprite.shield_cooldown = 120  # 2 seconds cooldown (60 FPS)
                                     sprite.move = STAND
                                     print(f"{player_name}'s shield broke!")
+                                    
+                                    # Record shield break event
+                                    self.record_event("SHIELD_BREAK", f"{player_name}'s shield shattered under pressure!")
                             
                             # No damage or knockback when shielded
                             print(f"{player_name} blocked {damage}% damage with shield")
+                            
+                            # Record shield block event for big hits
+                            if damage >= 15:
+                                self.record_event("BIG_BLOCK", f"{player_name} blocked a massive {damage}% attack with their shield!")
+                                
                             return
+                    
+                    # Get previous damage before hit
+                    prev_damage = sprite.damage_percent
                     
                     # Determine knockback values based on damage amount from attacker
                     # (This is handled inside the sprite's take_damage method)
                     new_damage = sprite.take_damage(damage, attacker_pos_x)
+                    
+                    # Record high-impact events
+                    if damage >= 15:
+                        self.record_event("BIG_HIT", f"{attacker_name} landed a devastating {damage}% attack on {player_name}!")
+                    
+                    # Record high knockback events
+                    if hasattr(sprite, 'hitstun_frames') and sprite.hitstun_frames > 30:
+                        # This is a very high knockback hit
+                        self.record_event("HUGE_LAUNCH", f"{player_name} was sent flying by {attacker_name}!")
+                    
+                    # Record damage milestone events
+                    damage_milestones = [50, 100, 150, 200, 250, 300]
+                    for milestone in damage_milestones:
+                        if prev_damage < milestone and new_damage >= milestone:
+                            self.record_event("DAMAGE_MILESTONE", f"{player_name} has taken over {milestone}% damage! They're in danger!")
                     
                     # Update player data to match sprite state
                     player_data['damage_percent'] = str(sprite.damage_percent)
@@ -1170,6 +1235,18 @@ class LocalGame:
         self.status = GAME
         self.playing = True
         self.initialized = True
+        
+        # Reset match events and start time
+        self.match_events = []
+        self.match_start_time = pg.time.get_ticks()
+        self.match_events.append({
+            "time": 0,
+            "type": "MATCH_START",
+            "message": "Match restarted!"
+        })
+        
+        # Reset match saved flag
+        self.match_saved = False
         
         # Game restart message
         self.chat_messages = []
@@ -1265,6 +1342,52 @@ class LocalGame:
                         pg.draw.circle(self.screen, shield_color, (center_x, center_y), 5)  # Use actual shield color
                         pg.draw.circle(self.screen, (255, 255, 255), (center_x, center_y), 5, 1)  # White outline
 
+    def drawRecentEvents(self):
+        """Draw recent high-impact events on screen"""
+        # Only show events from the last 5 seconds
+        current_time = pg.time.get_ticks() - self.match_start_time
+        recent_events = [e for e in self.match_events if current_time - e["time"] < 5000]
+        
+        # Only show the most recent 3 events
+        if len(recent_events) > 3:
+            recent_events = recent_events[-3:]
+        
+        # Draw events from bottom to top
+        y_pos = HEIGHT - 150  # Start from bottom of screen
+        
+        # Font for event text
+        event_font = pg.font.Font(None, 24)
+        
+        for event in reversed(recent_events):
+            # Choose color based on event type
+            color = (255, 255, 255)  # Default white
+            
+            if event["type"] in ["KO", "SHIELD_BREAK", "MASSIVE_KNOCKBACK"]:
+                color = (255, 50, 50)  # Red for major events
+            elif event["type"] in ["BIG_HIT", "HUGE_LAUNCH", "POWERFUL_KNOCKBACK"]:
+                color = (255, 165, 0)  # Orange for significant events
+            elif event["type"] in ["DAMAGE_MILESTONE", "TUMBLE"]:
+                color = (255, 255, 0)  # Yellow for warnings/milestones
+            elif event["type"] in ["L_CANCEL", "LEDGE_DASH"]:
+                color = (0, 255, 0)  # Green for skill-based events
+                
+            # Create a slightly transparent background for better readability
+            text_surface = event_font.render(event["message"], True, color)
+            text_width, text_height = text_surface.get_size()
+            
+            # Create background with padding
+            padding = 5
+            bg_rect = pg.Rect(10, y_pos - padding, text_width + padding*2, text_height + padding*2)
+            bg_surface = pg.Surface((bg_rect.width, bg_rect.height), pg.SRCALPHA)
+            bg_surface.fill((0, 0, 0, 160))  # Semi-transparent black
+            
+            # Draw background and text
+            self.screen.blit(bg_surface, bg_rect)
+            self.screen.blit(text_surface, (10 + padding, y_pos))
+            
+            # Move up for next event
+            y_pos -= text_height + 10
+
     # Add the bob-omb spawning method
     def spawn_bobomb(self):
         """Spawn a bob-omb in a random location above the arena"""
@@ -1305,6 +1428,68 @@ class LocalGame:
             self.chat_messages.append("Failed to spawn Bob-omb. Check console for details.")
             
             return None
+
+    def record_event(self, event_type, message):
+        """Record a high-impact event with timestamp"""
+        current_time = pg.time.get_ticks() - self.match_start_time
+        self.match_events.append({
+            "time": current_time,
+            "type": event_type,
+            "message": message
+        })
+        print(f"EVENT [{current_time}ms]: {event_type} - {message}")
+    
+    def save_match_events(self):
+        """Save match events to a log file"""
+        import os
+        import json
+        import datetime
+        
+        # Create logs directory if it doesn't exist
+        logs_dir = "match_logs"
+        if not os.path.exists(logs_dir):
+            os.makedirs(logs_dir)
+        
+        # Format current time for filename - using only hour, minute, second
+        now = datetime.datetime.now()
+        date_str = now.strftime("%H%M%S")
+        
+        # Increment match ID
+        self.match_id += 1
+        
+        # Create filename
+        if len(self.player_names) >= 2:
+            filename = f"{logs_dir}/match_{self.match_id}_{self.player_names[0]}_vs_{self.player_names[1]}_{date_str}.json"
+        else:
+            filename = f"{logs_dir}/match_{self.match_id}_{date_str}.json"
+        
+        # Get character types for each player
+        player_characters = {}
+        for name, data in self.players.items():
+            if 'character' in data:
+                player_characters[name] = data['character']
+        
+        # Create match data dictionary
+        match_data = {
+            "match_id": self.match_id,
+            "timestamp": now.strftime("%H:%M:%S"),
+            "duration": pg.time.get_ticks() - self.match_start_time,
+            "players": self.player_names,
+            "characters": player_characters,
+            "winner": self.winner,
+            "events": self.match_events
+        }
+        
+        # Save to file
+        try:
+            with open(filename, 'w') as f:
+                json.dump(match_data, f, indent=2)
+            print(f"Match events saved to {filename}")
+            
+            # Add message to chat
+            self.chat_messages.append(f"Match events saved to log file!")
+        except Exception as e:
+            print(f"Error saving match events: {e}")
 
 # main start of the program
 game = LocalGame()

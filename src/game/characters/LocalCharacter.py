@@ -1,12 +1,13 @@
 import sys
 import pygame as pg
+import math
 
 # move up one directory to be able to import the settings and images
 sys.path.append("..")
 from settings import *
 from images import *
 from characters.MeleePhysics import MeleePhysicsMixin  # Import the mixin
-from melee_physics import KNOCKBACK_EXAMPLES, calculate_knockback  # Import needed constants
+from melee_physics import KNOCKBACK_EXAMPLES, calculate_knockback, calculate_hitstun, knockback_to_velocity  # Import needed constants
 
 # Add new animation state
 LANDING = 'landing'
@@ -644,56 +645,47 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         self.rect.midbottom = self.pos
     
     def check_ground_beneath(self):
-        """Check if there's ground beneath the character"""
-        # Only run this check for grounded characters
+        """Check if there's actually ground beneath us when we think we're grounded"""
+        # If we already know we're in the air, no need to check
         if self.in_air:
             return
             
-        # CRITICAL: Get the EXACT position of the character's feet
-        feet_x = self.pos.x
-        feet_y = self.pos.y  # This is already the bottom of the character
+        # Get all platform collisions
+        ground_found = False
         
-        # Create a more precise hitbox for ground detection
-        feet_width = 5  # Narrow feet hitbox (pixels)
+        # Check if we're on any platform - we need to be very slightly above or touching
+        # Use a small downward ray cast (1-2 pixels) to check for platform collision
+        test_rect = pg.Rect(self.rect.x, self.rect.y, self.rect.width, self.rect.height + 2)
         
-        # Check for platforms directly beneath the character's feet
-        left_edge = feet_x - feet_width/2
-        right_edge = feet_x + feet_width/2
-        
-        # Debug visualization - uncomment if needed
-        # self.game.screen.fill((255, 0, 0), pg.Rect(left_edge, feet_y, feet_width, 5))
-        
-        # Check all platforms
-        found_platform = False
         for platform in self.game.platforms:
-            # Only check if feet are within horizontal bounds of the platform
-            if (left_edge <= platform.rect.right and 
-                right_edge >= platform.rect.left):
+            if platform.rect.colliderect(test_rect):
+                # We're on a platform
+                ground_found = True
                 
-                # Check if the platform is at the right height (accounting for the 4-pixel offset)
-                platform_top = platform.rect.top + 4
-                if abs(feet_y - platform_top) < 5:  # Within 5 pixels of platform's adjusted top
-                    found_platform = True
-                    # We're on this platform
-                    break
-        
-        # If no platform found beneath us, start falling
-        if not found_platform:
-            # Verify we're actually off the edge by doing a deeper check
-            # Look for ANY platform below us 
-            for platform in self.game.platforms:
-                if (left_edge <= platform.rect.right and 
-                    right_edge >= platform.rect.left and
-                    platform.rect.top > feet_y and
-                    platform.rect.top < feet_y + 100):  # Check up to 100 pixels below
-                    # There's a platform below, don't trigger fall yet - the character is just transitioning between platforms
-                    return
-            
-            # We're genuinely off an edge with nothing below
-            print(f"{self.name} is off edge at ({feet_x}, {feet_y}) - will fall")
+                # Remember last ground height
+                self.last_ground_y = self.pos.y
+                
+                # Store platform for collision checks
+                if not hasattr(self, 'last_platform'):
+                    self.last_platform = platform
+                    
+                # Once we've confirmed we're on a platform, we can stop checking
+                break
+                
+        # If no ground was found, we're actually in the air!
+        if not ground_found:
             self.in_air = True
-            self.vel.y = 0.1  # Small initial downward velocity
-    
+            print(f"{self.name} detected no ground beneath them while grounded! y={self.pos.y}")
+            
+            # Track this as a potentially high-impact event
+            if hasattr(self.game, 'record_event'):
+                if self.vel.y >= 0 and abs(self.vel.x) > 5:
+                    # Character is moving fast horizontally and falling - this could be a ledge dash
+                    self.game.record_event("LEDGE_DASH", f"{self.name} dashed off a ledge at high speed!")
+                else:
+                    # Just a regular falling off ledge
+                    self.game.record_event("LEDGE_FALL", f"{self.name} fell off a platform!")
+
     def get_platform_at_position(self, x, y):
         """Find a platform at the given position"""
         for platform in self.game.platforms:
@@ -920,6 +912,212 @@ class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
         self.shield_active = False
         if self.move == SHIELD:
             self.move = STAND
+
+    def take_damage_with_melee_physics(self, damage, kb_growth, base_kb, attacker_pos_x, angle_degrees=45):
+        """
+        Apply damage with Melee knockback physics
+        
+        Args:
+            damage: Damage amount (percent)
+            kb_growth: Knockback growth value
+            base_kb: Base knockback value
+            attacker_pos_x: X position of the attacker (for knockback direction)
+            angle_degrees: Launch angle in degrees (default 45°)
+        
+        Returns:
+            New damage percentage
+        """
+        try:
+            print(f"DAMAGE DEBUG: {self.name} taking damage, starting position: ({self.pos.x}, {self.pos.y})")
+            print(f"DAMAGE DEBUG: Pre-damage state: in_air={self.in_air}, dropping={getattr(self, 'is_dropping_through', False)}")
+            
+            # Calculate old damage percent for knockback formula
+            old_percent = self.damage_percent
+            
+            # Increase damage percentage
+            self.damage_percent += damage
+            
+            # Calculate knockback
+            if 'calculate_knockback' in globals():
+                # Use the imported function if available
+                knockback = calculate_knockback(
+                    defender_percent=self.damage_percent,
+                    attack_damage=damage,
+                    defender_weight=self.weight,
+                    knockback_growth=kb_growth,
+                    base_knockback=base_kb
+                )
+            else:
+                # Fallback formula if function not available
+                print("Warning: calculate_knockback not found, using basic formula")
+                percent_factor = self.damage_percent / 100.0
+                knockback = 20 + (percent_factor * kb_growth) + base_kb
+            
+            # Determine knockback direction (reverse horizontal component if hit from right)
+            knockback_direction = 1 if attacker_pos_x < self.pos.x else -1
+            
+            # Calculate velocity components
+            if 'knockback_to_velocity' in globals():
+                # Use imported function if available
+                vx, vy = knockback_to_velocity(knockback, angle_degrees)
+            else:
+                # Fallback velocity calculation
+                print("Warning: knockback_to_velocity not found, using basic calculation")
+                speed = 0.03 * knockback  # Same as in knockback_to_velocity
+                angle_radians = math.radians(angle_degrees)
+                vx = speed * math.cos(angle_radians)
+                vy = -speed * math.sin(angle_radians)  # Negative because y is down in PyGame
+            
+            print(f"DAMAGE DEBUG: Raw knockback values: knockback={knockback}, vx={vx}, vy={vy}")
+            
+            # Apply direction to horizontal component
+            vx *= knockback_direction
+            
+            # CRITICAL: Ensure vertical knockback is ALWAYS upward on hit
+            # Force strong upward knockback to ensure no platform fall-through
+            if vy > -2:  # If upward velocity is too low
+                vy = -5  # Set to a substantial upward value
+            
+            print(f"DAMAGE DEBUG: Final knockback velocity: vx={vx}, vy={vy}")
+            
+            # IMPORTANT: Force position adjustment to ensure no clipping into platforms
+            # Move character slightly upward to prevent platform clipping
+            self.pos.y -= 5  # Move up slightly to avoid platform intersection
+            
+            # Apply to velocity
+            self.vel.x = vx
+            self.vel.y = vy
+            
+            # Calculate hitstun
+            if 'calculate_hitstun' in globals():
+                self.hitstun_frames = calculate_hitstun(knockback)
+            else:
+                # Fallback hitstun calculation
+                print("Warning: calculate_hitstun not found, using basic calculation")
+                self.hitstun_frames = int(knockback * 0.4)  # Same factor as in calculate_hitstun
+            
+            # Set tumble state if knockback exceeds threshold
+            if 'LAUNCH_AND_STUN' in globals():
+                self.tumble_state = knockback >= LAUNCH_AND_STUN['tumble_threshold']
+            else:
+                # Default threshold if not defined
+                self.tumble_state = knockback >= 80
+            
+            # Enter damage state
+            self.move = DAMAGED
+            self.animation_locked = True
+            self.animation_lock_timer = 0
+            self.animation_lock_duration = self.hitstun_frames
+            
+            # Completely reset any platform drop-through state
+            self.dropping_through_platforms = set()
+            self.is_dropping_through = False
+            
+            # CRITICAL: Always set knockback air state
+            self.in_air = True
+            self.is_knockback_air = True
+            
+            # Record extreme knockback events in game
+            if hasattr(self.game, 'record_event'):
+                if knockback > 150:
+                    # This is an extremely powerful hit
+                    self.game.record_event("MASSIVE_KNOCKBACK", f"{self.name} was hit with massive knockback power ({knockback:.1f})!")
+                elif knockback > 100:
+                    # This is a very powerful hit
+                    self.game.record_event("POWERFUL_KNOCKBACK", f"{self.name} was hit with powerful knockback ({knockback:.1f})!")
+                    
+                # Record tumble state if it happens
+                if self.tumble_state:
+                    self.game.record_event("TUMBLE", f"{self.name} was knocked into a tumbling state!")
+            
+            # Debug output
+            print(f"DAMAGE DEBUG: {self.name} took {damage}% damage (now at {self.damage_percent}%)")
+            print(f"DAMAGE DEBUG: Knockback: {knockback:.2f}, Hitstun: {self.hitstun_frames} frames")
+            print(f"DAMAGE DEBUG: New position: ({self.pos.x}, {self.pos.y}), velocity: ({self.vel.x:.2f}, {self.vel.y:.2f})")
+            print(f"DAMAGE DEBUG: Post-hit state: in_air={self.in_air}, knockback_air={self.is_knockback_air}, dropping={self.is_dropping_through}")
+            
+            return self.damage_percent
+        except Exception as e:
+            print(f"ERROR in take_damage_with_melee_physics: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Basic fallback implementation if something goes wrong
+            self.damage_percent += damage
+            
+            # If shield is active, don't take damage
+            if self.shield_active and not self.shield_broken:
+                return self.damage_percent
+            
+            # Basic damage and knockback
+            self.damage_percent += damage
+            
+            # Simple knockback based on damage percentage
+            knockback_multiplier = 1.0 + (self.damage_percent / 100.0)
+            
+            # Determine horizontal knockback direction
+            knockback_direction = 1 if attacker_pos_x < self.pos.x else -1
+            
+            # Apply simple knockback
+            self.vel.x = 5 * knockback_multiplier * knockback_direction
+            self.vel.y = -4 * knockback_multiplier  # Negative for upward
+            
+            # Set state
+            self.in_air = True
+            self.move = DAMAGED
+            self.animation_locked = True
+            self.animation_lock_timer = 0
+            self.animation_lock_duration = 20  # Fixed stun duration
+            
+            print(f"{self.name} took {damage}% damage, now at {self.damage_percent}%")
+            return self.damage_percent
+
+    def apply_landing_lag_with_melee_physics(self, was_aerial_attack=False):
+        """Apply landing lag with Melee physics rules"""
+        try:
+            # Make sure melee settings are available
+            if 'LANDING_LAG' not in globals():
+                print("Warning: LANDING_LAG settings not found, using defaults")
+                normal_landing_lag = 4
+                aerial_landing_lag = 12 if was_aerial_attack else 4
+                l_cancel_factor = 0.5
+            else:
+                normal_landing_lag = LANDING_LAG['normal_landing_lag_frames']
+                aerial_landing_lag = was_aerial_attack and 12 or normal_landing_lag
+                l_cancel_factor = LANDING_LAG['l_cancel_factor']
+                
+            # Determine base landing lag
+            landing_lag_frames = normal_landing_lag
+            
+            # Check for L-cancel success
+            if was_aerial_attack:
+                landing_lag_frames = aerial_landing_lag
+                
+                if self.l_cancel_successful:
+                    # L-cancel reduces landing lag
+                    landing_lag_frames = int(landing_lag_frames * l_cancel_factor)
+                    print(f"{self.name} successfully L-canceled! Landing lag reduced to {landing_lag_frames} frames")
+                    
+                    # Record L-cancel event
+                    if hasattr(self.game, 'record_event'):
+                        self.game.record_event("L_CANCEL", f"{self.name} executed a perfect L-cancel!")
+            
+            # Apply landing lag
+            self.move = LANDING
+            self.animation_locked = True
+            self.animation_lock_timer = 0
+            self.animation_lock_duration = landing_lag_frames
+            
+            # Reset L-cancel flags
+            self.l_cancel_window = 0
+            self.l_cancel_successful = False
+            
+            return landing_lag_frames
+        except Exception as e:
+            print(f"Error in apply_landing_lag_with_melee_physics: {e}")
+            import traceback
+            traceback.print_exc()
+            return 4  # Default fallback
 
 # Create local character versions of each character
 
