@@ -1,11 +1,15 @@
 # Super Smash Bros
 
 
-
-Modified version (for Hackathon) of the project based on the CMSC 137 project made in Python and developed by:
+Modified version (for South Coast Plaza Hackathon) of the project based on the CMSC 137 project made in Python and developed by:
 * Carlos Miguel Canonizado
 * Francheska Marie Pelaez Semilla
 * Shane Carla Serrano
+
+Modified by:
+* Lawson Fuller
+* Bo Huang
+* Nihal Nihalani
 
 ## Play!
 

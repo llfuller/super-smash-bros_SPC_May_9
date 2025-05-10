@@ -12,6 +12,7 @@ class Button:
         self.w = w
         self.h = h
         self.image = pg.image.load(img_path+label+'a.png')
+        self.is_highlighted = False
 
     # returns True and changes image if mouse is inside button
     # else returns False and retains original image
@@ -20,7 +21,10 @@ class Button:
         if pos[0] > self.x and pos[0] < self.x + self.w:
             if pos[1] > self.y and pos[1] < self.y + self.h:
                 self.image = pg.image.load(img_path+self.label+'b.png')
+                was_highlighted = self.is_highlighted
+                self.is_highlighted = True
                 return True
 
         self.image = pg.image.load(img_path+self.label+'a.png')
+        self.is_highlighted = False
         return False
