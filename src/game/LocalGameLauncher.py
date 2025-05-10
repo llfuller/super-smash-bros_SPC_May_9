@@ -11,6 +11,7 @@ import sys
 import os
 import pygame as pg
 import time
+from sound_player import SoundPlayer  # Import the SoundPlayer class
 
 # Simply use the current directory as the game directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +35,9 @@ pg.joystick.init()
 
 print("=== Super Smash Bros - Local Two-Player Edition Launcher ===")
 print()
+
+# Play startup sound
+SoundPlayer.play_sound("Select")
 
 # Display GIANT MODE status
 from settings import GIANT_MODE_ENABLED
