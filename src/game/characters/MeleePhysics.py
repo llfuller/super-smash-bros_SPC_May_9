@@ -429,4 +429,55 @@ class MeleePhysicsMixin:
     def update_l_cancel_window(self):
         """Update L-cancel window timer"""
         if self.l_cancel_window > 0:
-            self.l_cancel_window -= 1 
+            self.l_cancel_window -= 1
+            
+    def apply_tilt_physics(self, tilt_angle, tilt_direction):
+        """
+        Apply physics effects when the battlefield is tilted
+        
+        Args:
+            tilt_angle: Current tilt angle in degrees
+            tilt_direction: Direction of tilt (1 for right, -1 for left)
+        """
+        # Skip if character is defeated
+        if hasattr(self, 'is_defeated') and self.is_defeated():
+            return
+            
+        # Convert angle to radians for calculations
+        import math
+        angle_rad = math.radians(tilt_angle)
+        
+        # Calculate slide force based on angle
+        # Use sine function to determine force component along the tilted surface
+        slide_force = 0.8 * math.sin(angle_rad) * tilt_direction
+        
+        # Apply sliding acceleration
+        self.acc.x += slide_force
+        
+        # Reduce friction to make sliding more pronounced
+        if hasattr(self, 'ground_physics') and not self.in_air:
+            # Store original friction if not already stored
+            if not hasattr(self, 'original_friction'):
+                self.original_friction = self.ground_physics.get('friction', 0.1)
+                
+            # Reduce friction based on tilt angle
+            friction_factor = max(0.1, 1.0 - (abs(tilt_angle) / 90.0))
+            self.ground_physics['friction'] = self.original_friction * friction_factor
+        
+        # Force character into air state if angle is steep enough
+        if abs(tilt_angle) > 25 and not self.in_air:
+            self.in_air = True
+            # Add a small upward velocity to simulate "losing footing"
+            self.vel.y = -2
+            
+        # Increase gravity effect when in air during tilt
+        if self.in_air and hasattr(self, 'air_physics'):
+            # Calculate additional downward force based on tilt
+            extra_gravity = 0.2 * math.sin(abs(angle_rad))
+            self.acc.y += extra_gravity
+            
+        # Disable ability to jump if tilt is severe
+        if abs(tilt_angle) > 30:
+            self.can_jump = False
+        else:
+            self.can_jump = True

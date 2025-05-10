@@ -21,6 +21,9 @@ from characters.LocalCharacter import (
     SHIELD_COLORS, SHIELD_ALPHA, SHIELD_SIZE
 )
 
+# Import battlefield tilt feature
+from battlefield_tilt import BattlefieldTilt
+
 # menus
 from menus.Intro import Intro
 from menus.Other import Other
@@ -97,6 +100,14 @@ class LocalGame:
             print(f"Loaded {entities} entities and {timers} timers from bobomb_entity.json")
         except Exception as e:
             print(f"Error loading bob-omb entity definitions: {e}")
+            
+        # Initialize battlefield tilt feature
+        self.battlefield_tilt = BattlefieldTilt(self)
+        
+        # Add a key for triggering the battlefield tilt (T key)
+        self.tilt_key = pg.K_t
+        self.tilt_cooldown = 0
+        self.tilt_cooldown_duration = 600  # 10 seconds at 60 FPS
         
         # Emergency recovery counter for movement issues
         self.emergency_fix_applied = False
@@ -473,6 +484,22 @@ class LocalGame:
             
             # Update entity system timers
             self.entity_system.update_timers(1/60)  # assuming 60 FPS
+            
+            # Update battlefield tilt if active
+            if hasattr(self, 'battlefield_tilt'):
+                self.battlefield_tilt.update()
+                
+            # Check for tilt trigger key
+            keys = pg.key.get_pressed()
+            if self.playing and hasattr(self, 'tilt_key') and keys[self.tilt_key] and self.tilt_cooldown <= 0:
+                if hasattr(self, 'battlefield_tilt') and self.battlefield_tilt.trigger_tilt():
+                    print("Battlefield tilt triggered!")
+                    self.tilt_cooldown = self.tilt_cooldown_duration
+                    self.record_event("TRIGGER_TILT", "The battlefield has started tilting!", "High")
+            
+            # Update tilt cooldown
+            if hasattr(self, 'tilt_cooldown') and self.tilt_cooldown > 0:
+                self.tilt_cooldown -= 1
             
             # IMPORTANT: Process player controller input BEFORE sprite updates
             # This ensures that jump intents and other inputs are processed first
