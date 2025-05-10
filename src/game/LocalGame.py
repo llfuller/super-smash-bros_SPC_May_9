@@ -1108,7 +1108,7 @@ class LocalGame:
             
             # Record KO event
             if defeated_player:
-                self.record_event("KO", f"{alive} knocked out {defeated_player}! GAME!")
+                self.record_event("KO", f"{alive} knocked out {defeated_player}! GAME!", "Critical")
                 
             # Save match events to log file
             if not self.match_saved:
@@ -1153,14 +1153,14 @@ class LocalGame:
                                     print(f"{player_name}'s shield broke!")
                                     
                                     # Record shield break event
-                                    self.record_event("SHIELD_BREAK", f"{player_name}'s shield shattered under pressure!")
+                                    self.record_event("SHIELD_BREAK", f"{player_name}'s shield shattered under pressure!", "High")
                             
                             # No damage or knockback when shielded
                             print(f"{player_name} blocked {damage}% damage with shield")
                             
                             # Record shield block event for big hits
                             if damage >= 15:
-                                self.record_event("BIG_BLOCK", f"{player_name} blocked a massive {damage}% attack with their shield!")
+                                self.record_event("BIG_BLOCK", f"{player_name} blocked a massive {damage}% attack with their shield!", "Medium")
                                 
                             return
                     
@@ -1171,20 +1171,28 @@ class LocalGame:
                     # (This is handled inside the sprite's take_damage method)
                     new_damage = sprite.take_damage(damage, attacker_pos_x)
                     
-                    # Record high-impact events
-                    if damage >= 15:
-                        self.record_event("BIG_HIT", f"{attacker_name} landed a devastating {damage}% attack on {player_name}!")
+                    # Record high-impact events based on damage amount
+                    if damage >= 25:
+                        self.record_event("BIG_HIT", f"{attacker_name} landed a devastating {damage}% attack on {player_name}!", "High")
+                    elif damage >= 15:
+                        self.record_event("BIG_HIT", f"{attacker_name} landed a powerful {damage}% attack on {player_name}!", "Medium")
                     
                     # Record high knockback events
-                    if hasattr(sprite, 'hitstun_frames') and sprite.hitstun_frames > 30:
+                    if hasattr(sprite, 'hitstun_frames') and sprite.hitstun_frames > 40:
                         # This is a very high knockback hit
-                        self.record_event("HUGE_LAUNCH", f"{player_name} was sent flying by {attacker_name}!")
+                        self.record_event("HUGE_LAUNCH", f"{player_name} was sent flying across the stage by {attacker_name}!", "High")
+                    elif hasattr(sprite, 'hitstun_frames') and sprite.hitstun_frames > 25:
+                        # This is a high knockback hit
+                        self.record_event("HUGE_LAUNCH", f"{player_name} was launched by {attacker_name}!", "Medium")
                     
                     # Record damage milestone events
                     damage_milestones = [50, 100, 150, 200, 250, 300]
                     for milestone in damage_milestones:
                         if prev_damage < milestone and new_damage >= milestone:
-                            self.record_event("DAMAGE_MILESTONE", f"{player_name} has taken over {milestone}% damage! They're in danger!")
+                            if milestone >= 200:
+                                self.record_event("DAMAGE_MILESTONE", f"{player_name} has taken over {milestone}% damage! They're in extreme danger!", "High")
+                            else:
+                                self.record_event("DAMAGE_MILESTONE", f"{player_name} has taken over {milestone}% damage! They're in danger!", "Medium")
                     
                     # Update player data to match sprite state
                     player_data['damage_percent'] = str(sprite.damage_percent)
@@ -1242,7 +1250,8 @@ class LocalGame:
         self.match_events.append({
             "time": 0,
             "type": "MATCH_START",
-            "message": "Match restarted!"
+            "message": "[Medium] Match restarted!",
+            "importance": "Medium"
         })
         
         # Reset match saved flag
@@ -1359,17 +1368,19 @@ class LocalGame:
         event_font = pg.font.Font(None, 24)
         
         for event in reversed(recent_events):
-            # Choose color based on event type
+            # Choose color based on importance level
             color = (255, 255, 255)  # Default white
             
-            if event["type"] in ["KO", "SHIELD_BREAK", "MASSIVE_KNOCKBACK"]:
-                color = (255, 50, 50)  # Red for major events
-            elif event["type"] in ["BIG_HIT", "HUGE_LAUNCH", "POWERFUL_KNOCKBACK"]:
-                color = (255, 165, 0)  # Orange for significant events
-            elif event["type"] in ["DAMAGE_MILESTONE", "TUMBLE"]:
-                color = (255, 255, 0)  # Yellow for warnings/milestones
-            elif event["type"] in ["L_CANCEL", "LEDGE_DASH"]:
-                color = (0, 255, 0)  # Green for skill-based events
+            importance = event.get("importance", "Medium")
+            
+            if importance == "Critical":
+                color = (255, 0, 0)    # Bright red for critical events
+            elif importance == "High":
+                color = (255, 100, 0)  # Orange-red for high importance
+            elif importance == "Medium":
+                color = (255, 200, 0)  # Yellow-orange for medium importance
+            elif importance == "Low":
+                color = (200, 200, 200) # Gray for low importance
                 
             # Create a slightly transparent background for better readability
             text_surface = event_font.render(event["message"], True, color)
@@ -1379,7 +1390,7 @@ class LocalGame:
             padding = 5
             bg_rect = pg.Rect(10, y_pos - padding, text_width + padding*2, text_height + padding*2)
             bg_surface = pg.Surface((bg_rect.width, bg_rect.height), pg.SRCALPHA)
-            bg_surface.fill((0, 0, 0, 160))  # Semi-transparent black
+            bg_surface.fill((0, 0, 0, 180))  # Semi-transparent black
             
             # Draw background and text
             self.screen.blit(bg_surface, bg_rect)
@@ -1429,15 +1440,26 @@ class LocalGame:
             
             return None
 
-    def record_event(self, event_type, message):
-        """Record a high-impact event with timestamp"""
+    def record_event(self, event_type, message, importance="Medium"):
+        """
+        Record a high-impact event with timestamp and importance level for the narrator
+        
+        Args:
+            event_type: Type of event (e.g., "KO", "BIG_HIT", etc.)
+            message: Description of the event
+            importance: Importance level ("Low", "Medium", "High", "Critical")
+        """
+        # Add importance level tag to message
+        tagged_message = f"[{importance}] {message}"
+        
         current_time = pg.time.get_ticks() - self.match_start_time
         self.match_events.append({
             "time": current_time,
             "type": event_type,
-            "message": message
+            "message": tagged_message,
+            "importance": importance
         })
-        print(f"EVENT [{current_time}ms]: {event_type} - {message}")
+        print(f"EVENT [{current_time}ms]: {event_type} - {tagged_message}")
     
     def save_match_events(self):
         """Save match events to a log file"""

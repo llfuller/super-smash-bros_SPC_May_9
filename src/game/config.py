@@ -37,10 +37,10 @@ PRO_CONTROLLER = {
     'left': 1,        # Left on D-pad
     'right': 2,       # Right on D-pad
     'down': 3,        # Down on D-pad
-    'y_button': 0,    # Y button - Jump (Top button)
-    'x_button': 1,    # X button - Jump (Left button)
-    'b_button': 2,    # B button - Weak attack (Right button)
-    'a_button': 3,    # A button - Strong attack (Bottom button)
+    'y_button': 2,    # Y button - Weak attack (Right button)
+    'x_button': 3,    # X button - Strong attack (Bottom button)
+    'b_button': 0,    # B button - Jump (Top button)
+    'a_button': 1,    # A button - Jump (Left button)
     'l_button': 9,    # L button - Shield (corrected from 4 to 9)
     'r_button': 10,   # R button - Shield (corrected from 5 to 10)
     'zl_button': 6,   # ZL button - Shield

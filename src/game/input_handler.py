@@ -136,11 +136,12 @@ class InputHandler:
            "nintendo" in controller_name_lower:
             print("Detected as Nintendo Switch Pro Controller")
             return {
-                INTENTS['WEAK_ATTACK']: PRO_CONTROLLER['b_button'],     # B button (Right button)
-                INTENTS['HEAVY_ATTACK']: PRO_CONTROLLER['a_button'],    # A button (Bottom button)
-                INTENTS['MENU']: PRO_CONTROLLER['minus'],               # Minus button
-                INTENTS['RESTART']: PRO_CONTROLLER['plus'],             # Plus button
-                INTENTS['QUIT']: PRO_CONTROLLER['home'],                # Home button
+                INTENTS['WEAK_ATTACK']: PRO_CONTROLLER['y_button'],    # Y button (Right button) - Weak attack
+                INTENTS['HEAVY_ATTACK']: PRO_CONTROLLER['x_button'],   # X button (Bottom button) - Strong attack
+                INTENTS['MENU']: PRO_CONTROLLER['minus'],              # Minus button
+                INTENTS['RESTART']: PRO_CONTROLLER['plus'],            # Plus button
+                INTENTS['QUIT']: PRO_CONTROLLER['home'],               # Home button
+                # B and A buttons for jump are handled in _process_controller_state
                 # Movement is handled through stick and hat
             }
         elif "xbox" in controller_name_lower:
@@ -412,19 +413,33 @@ class InputHandler:
                     if self.debug and self.debug_frame_counter % 30 == 0:
                         print(f"{player_name} button {button} -> {intent}")
             
-            # Check for Y button to work as jump (Switch Pro Controller)
+            # Check for B button to work as jump (Switch Pro Controller)
+            b_button = min(PRO_CONTROLLER['b_button'], len(state['buttons'])-1)
+            if b_button >= 0 and state['buttons'][b_button]:
+                intents[INTENTS['MOVE_UP']] = True
+                if self.debug and self.debug_frame_counter % 30 == 0:
+                    print(f"{player_name} B button ({b_button}) -> MOVE_UP (jump)")
+            
+            # A button as jump (Switch Pro Controller)
+            a_button = min(PRO_CONTROLLER['a_button'], len(state['buttons'])-1)
+            if a_button >= 0 and state['buttons'][a_button]:
+                intents[INTENTS['MOVE_UP']] = True
+                if self.debug and self.debug_frame_counter % 30 == 0:
+                    print(f"{player_name} A button ({a_button}) -> MOVE_UP (jump)")
+            
+            # Y button as weak attack
             y_button = min(PRO_CONTROLLER['y_button'], len(state['buttons'])-1)
             if y_button >= 0 and state['buttons'][y_button]:
-                intents[INTENTS['MOVE_UP']] = True
+                intents[INTENTS['WEAK_ATTACK']] = True
                 if self.debug and self.debug_frame_counter % 30 == 0:
-                    print(f"{player_name} Y button ({y_button}) -> MOVE_UP (jump)")
-            
-            # X button as jump (Switch Pro Controller)
+                    print(f"{player_name} Y button ({y_button}) -> WEAK_ATTACK")
+                    
+            # X button as strong attack
             x_button = min(PRO_CONTROLLER['x_button'], len(state['buttons'])-1)
             if x_button >= 0 and state['buttons'][x_button]:
-                intents[INTENTS['MOVE_UP']] = True
+                intents[INTENTS['HEAVY_ATTACK']] = True
                 if self.debug and self.debug_frame_counter % 30 == 0:
-                    print(f"{player_name} X button ({x_button}) -> MOVE_UP (jump)")
+                    print(f"{player_name} X button ({x_button}) -> HEAVY_ATTACK")
             
             # Debug all button states to find which ones are pressed
             if self.debug and self.debug_frame_counter % 10 == 0:

@@ -215,9 +215,21 @@ class MeleePhysicsMixin:
             # Set tumble state if knockback exceeds threshold
             if 'LAUNCH_AND_STUN' in globals():
                 self.tumble_state = knockback >= LAUNCH_AND_STUN['tumble_threshold']
+                tumble_threshold = LAUNCH_AND_STUN['tumble_threshold']
             else:
                 # Default threshold if not defined
-                self.tumble_state = knockback >= 80
+                tumble_threshold = 80
+                self.tumble_state = knockback >= tumble_threshold
+            
+            # Record tumble event if threshold exceeded
+            if self.tumble_state and hasattr(self, 'game') and hasattr(self.game, 'record_event'):
+                # Determine the importance based on knockback strength
+                if knockback >= tumble_threshold * 1.5:
+                    # Extremely high knockback
+                    self.game.record_event("EXTREME_TUMBLE", f"{self.name} is helplessly tumbling through the air!", "High")
+                else:
+                    # Regular tumble
+                    self.game.record_event("TUMBLE", f"{self.name} is tumbling out of control!", "Medium")
             
             # Enter damage state
             self.move = DAMAGED
@@ -232,6 +244,13 @@ class MeleePhysicsMixin:
             # CRITICAL: Always set knockback air state
             self.in_air = True
             self.is_knockback_air = True
+            
+            # Record extreme knockback events
+            if hasattr(self, 'game') and hasattr(self.game, 'record_event'):
+                if knockback > 120:
+                    self.game.record_event("CRITICAL_HIT", f"{self.name} was hit with devastating force!", "Critical")
+                elif knockback > 100:
+                    self.game.record_event("POWERFUL_KNOCKBACK", f"{self.name} was launched with extreme force!", "High")
             
             # Debug output
             print(f"DAMAGE DEBUG: {self.name} took {damage}% damage (now at {self.damage_percent}%)")
@@ -293,6 +312,10 @@ class MeleePhysicsMixin:
                     base_lag_frames *= LANDING_LAG['l_cancel_factor']
                     self.l_cancel_successful = True
                     print(f"{self.name} successfully L-canceled!")
+                    
+                    # Record L-cancel event if the game has record_event method
+                    if hasattr(self.game, 'record_event'):
+                        self.game.record_event("L_CANCEL", f"{self.name} executed a perfect L-cancel!", "Low")
                 else:
                     self.l_cancel_successful = False
             else:
@@ -327,6 +350,29 @@ class MeleePhysicsMixin:
             self.animation_locked = False
             self.landing_lag = 0
     
+    def try_wavedash(self, direction):
+        """
+        Attempt to perform a wavedash (air dodge into ground)
+        
+        Args:
+            direction: Direction of the wavedash (-1 for left, 1 for right)
+        """
+        if hasattr(self, 'air_dodge') and callable(getattr(self, 'air_dodge')):
+            # If close to ground (within 10 pixels) and moving downward
+            if self.in_air and self.pos.y > self.ground_height - 10 and self.vel.y > 0:
+                # Calculate horizontal direction for the air dodge
+                horizontal_input = direction
+                
+                # Perform air dodge (must be implemented in the character class)
+                self.air_dodge(horizontal_input)
+                
+                # Record wavedash event if we have access to game
+                if hasattr(self, 'game') and hasattr(self.game, 'record_event'):
+                    self.game.record_event("WAVEDASH", f"{self.name} executed a slick wavedash!", "Low")
+                
+                return True
+        return False
+    
     def try_l_cancel(self):
         """
         Attempt to L-cancel (sets window for successful L-cancel)
@@ -335,7 +381,32 @@ class MeleePhysicsMixin:
         if self.in_air:
             self.l_cancel_window = LANDING_LAG['l_cancel_window_frames']
             print(f"{self.name} attempting L-cancel")
-            
+    
+    def try_dash_dance(self, new_direction):
+        """
+        Attempt to perform a dash dance (quickly changing dash direction)
+        
+        Args:
+            new_direction: New dash direction (-1 for left, 1 for right)
+        """
+        # Check if we're in dash state and changing to opposite direction
+        if hasattr(self, 'dash_direction') and self.move == DASH:
+            if self.dash_direction != 0 and self.dash_direction != new_direction:
+                # Record dash dance event
+                if hasattr(self, 'game') and hasattr(self.game, 'record_event'):
+                    # Only record occasionally to avoid spam
+                    if hasattr(self, 'dash_dance_counter'):
+                        self.dash_dance_counter += 1
+                        if self.dash_dance_counter % 3 == 0:  # Every 3rd dash
+                            self.game.record_event("DASH_DANCE", f"{self.name} is dash dancing with precision!", "Low")
+                    else:
+                        self.dash_dance_counter = 1
+                        
+                # Set new dash direction
+                self.dash_direction = new_direction
+                return True
+        return False
+    
     def update_l_cancel_window(self):
         """Update L-cancel window timer"""
         if self.l_cancel_window > 0:
