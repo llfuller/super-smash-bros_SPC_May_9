@@ -4,11 +4,12 @@ This version of the game allows you to play with two players on a single compute
 
 ## How to Run
 
-1. Navigate to the `src/game` directory
-2. Run the launcher:
-   ```
-   python LocalGameLauncher.py
-   ```
+Simply run the launcher from the root directory:
+```
+python LocalGameLauncher.py
+```
+
+No need to navigate to the src/game directory or set up a server!
 
 ## Controls
 
@@ -44,15 +45,32 @@ The local version maintains the same gameplay mechanics as the original networke
 2. **Two Player Management**: Supports two players on the same keyboard with different control schemes
 3. **Same Game Features**: Maintains character selection, platforming, attacking, and win detection
 4. **Automatic Player 2**: Sets up the second player automatically when Player 1 is ready
+5. **Separate Controls**: Each player has their own dedicated control scheme to avoid conflicts
+
+## Key Improvements
+
+Compared to the original networked game, this local version offers:
+
+1. **Simplified Setup**: No server needed, just run a single file
+2. **Immediate Play**: Get into the action with minimal setup
+3. **Local Gameplay**: Perfect for playing with a friend on the same computer
+4. **No Self-Damage**: Players can't damage themselves when attacking
+5. **Custom Controls**: Designed specifically for two-player local play
 
 ## Troubleshooting
 
 If you encounter any issues:
 
-- Make sure you're running from the `src/game` directory
 - Ensure you have Pygame installed: `pip install pygame`
+- Run from the root directory of the project
+- Make sure both control schemes are working (arrow keys for Player 1, WASD for Player 2)
 - Check the console for any error messages
 
 ## Developer Notes
 
-This local version was created by internalizing the server functionality from the original networked game. The implementation maintains compatibility with the original menu system and character classes for a seamless experience. 
+This local version was created by internalizing the server functionality from the original networked game. The implementation uses:
+
+- A custom `LocalCharacter` class to handle different control schemes
+- Player-specific enemy groups to prevent self-damage
+- Automatic Player 2 setup for streamlined gameplay
+- Path handling that works from the root directory 

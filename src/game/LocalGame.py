@@ -94,7 +94,14 @@ class KeyboardController:
         # Move left
         if keys[self.left_key] and float(player_data['xPos']) > 40:
             sprite.acc.x = -sprite.acce
-            sprite.walk_c = (sprite.walk_c + 1) % 8
+            # Make sure walk_c doesn't go out of bounds
+            walk_count = getattr(sprite, 'walk_c', 0)
+            if hasattr(sprite, 'walkL'):
+                max_walk = len(sprite.walkL) - 1
+                sprite.walk_c = (walk_count + 1) % max(1, max_walk)
+            else:
+                sprite.walk_c = (walk_count + 1) % 8
+            
             sprite.direc = LEFT
             sprite.move = WALK
             player_data['direc'] = LEFT
@@ -104,7 +111,14 @@ class KeyboardController:
         # Move right
         elif keys[self.right_key] and float(player_data['xPos']) < GAME_WIDTH-40:
             sprite.acc.x = sprite.acce
-            sprite.walk_c = (sprite.walk_c + 1) % 8
+            # Make sure walk_c doesn't go out of bounds
+            walk_count = getattr(sprite, 'walk_c', 0)
+            if hasattr(sprite, 'walkR'):
+                max_walk = len(sprite.walkR) - 1
+                sprite.walk_c = (walk_count + 1) % max(1, max_walk)
+            else:
+                sprite.walk_c = (walk_count + 1) % 8
+            
             sprite.direc = RIGHT
             sprite.move = WALK
             player_data['direc'] = RIGHT
@@ -589,6 +603,9 @@ class LocalGame:
     def createCharacterSprites(self):
         # Create sprites for both players
         try:
+            # Create a dictionary to store the sprites by player name for easier reference
+            player_sprites = {}
+            
             for name, player_data in self.players.items():
                 char = player_data['character']
                 x = float(player_data['xPos'])
@@ -599,35 +616,70 @@ class LocalGame:
                 m = player_data['move']
                 pos = [x, y]
                 
+                player = None
                 # Create the appropriate character using our local character classes
-                if char == MARIO:
+                try:
+                    if char == MARIO:
+                        player = LocalMario(self, name, 'alive', h, pos, d, w, m)
+                    elif char == LUIGI:
+                        player = LocalLuigi(self, name, 'alive', h, pos, d, w, m)
+                    elif char == YOSHI:
+                        player = LocalYoshi(self, name, 'alive', h, pos, d, w, m)
+                    elif char == POPO:
+                        player = LocalPopo(self, name, 'alive', h, pos, d, w, m)
+                    elif char == NANA:
+                        player = LocalNana(self, name, 'alive', h, pos, d, w, m)
+                    elif char == LINK:
+                        player = LocalLink(self, name, 'alive', h, pos, d, w, m)
+                    else:
+                        # Default to Mario if character not found
+                        print(f"Character {char} not found, defaulting to Mario")
+                        player = LocalMario(self, name, 'alive', h, pos, d, w, m)
+                
+                except Exception as char_error:
+                    print(f"Error creating character {char}: {char_error}")
+                    print("Defaulting to Mario")
+                    # If creating a specific character fails, default to Mario
                     player = LocalMario(self, name, 'alive', h, pos, d, w, m)
-                elif char == LUIGI:
-                    player = LocalLuigi(self, name, 'alive', h, pos, d, w, m)
-                elif char == YOSHI:
-                    player = LocalYoshi(self, name, 'alive', h, pos, d, w, m)
-                elif char == POPO:
-                    player = LocalPopo(self, name, 'alive', h, pos, d, w, m)
-                elif char == NANA:
-                    player = LocalNana(self, name, 'alive', h, pos, d, w, m)
-                elif char == LINK:
-                    player = LocalLink(self, name, 'alive', h, pos, d, w, m)
                 
-                # Store the sprite reference
-                player_data['sprite'] = player
-                
-                # Add to sprite groups
-                self.all_sprites.add(player)
-            
-            # Set up enemy relationships - each player is an enemy to all other players
-            for player_name, player_data in self.players.items():
-                if 'sprite' not in player_data:
-                    continue
+                if player:
+                    # Store the sprite reference
+                    player_data['sprite'] = player
+                    player_sprites[name] = player
                     
-                for other_name, other_data in self.players.items():
-                    if player_name != other_name and 'sprite' in other_data:
-                        self.enemy_sprites.add(other_data['sprite'])
-                        
+                    # Add to sprite groups
+                    self.all_sprites.add(player)
+            
+            # Clear the existing enemy_sprites group
+            self.enemy_sprites.empty()
+            
+            # Create a dedicated enemy_sprites group for each player
+            # This ensures that a player doesn't attack themselves
+            for player_name, player_sprite in player_sprites.items():
+                # Create a list of enemies for this player
+                enemies = []
+                
+                # Add all other players as enemies
+                for other_name, other_sprite in player_sprites.items():
+                    if other_name != player_name:
+                        enemies.append(other_sprite)
+                
+                # Set the player's enemy sprites
+                # Note: We need a custom enemy sprites group for each character
+                # But the API only has one self.enemy_sprites group
+                # We'll need to modify the weakAttack and heavyAttack methods
+                # to use this custom group instead
+                player_sprite.enemy_sprites = pg.sprite.Group()
+                for enemy in enemies:
+                    player_sprite.enemy_sprites.add(enemy)
+            
+            # For backward compatibility with the original game code,
+            # set up the main enemy_sprites group (for debugging only)
+            for player_name, player_sprite in player_sprites.items():
+                for other_name, other_sprite in player_sprites.items():
+                    if player_name != other_name:
+                        self.enemy_sprites.add(other_sprite)
+                    
         except Exception as e:
             print(f"Error in createCharacterSprites: {e}")
             import traceback
@@ -656,6 +708,15 @@ class LocalGame:
     def attackPlayer(self, player_name, damage, move):
         # Process attack on a player
         if player_name in self.players:
+            # Debug output
+            attacker = ""
+            for name, player_data in self.players.items():
+                if 'sprite' in player_data and player_data['sprite'] != self.players[player_name].get('sprite'):
+                    attacker = name
+                    break
+            
+            print(f"Player {attacker} attacks {player_name} for {damage} damage!")
+            
             target = self.players[player_name]
             current_health = float(target['health'])
             new_health = max(0, current_health - float(damage))

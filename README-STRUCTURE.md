@@ -6,6 +6,7 @@ This document provides a comprehensive overview of the project's directory struc
 
 ```
 .
+├── LocalGameLauncher.py     # Root launcher for the local two-player game
 ├── src/
 │   ├── game/
 │   │   ├── characters/
@@ -14,7 +15,8 @@ This document provides a comprehensive overview of the project's directory struc
 │   │   │   ├── Yoshi.py
 │   │   │   ├── Popo.py
 │   │   │   ├── Nana.py
-│   │   │   └── Link.py
+│   │   │   ├── Link.py
+│   │   │   └── LocalCharacter.py  # Base character class for local multiplayer
 │   │   ├── menus/
 │   │   │   ├── Intro.py
 │   │   │   ├── Start.py
@@ -24,7 +26,8 @@ This document provides a comprehensive overview of the project's directory struc
 │   │   │   ├── CharButton.py
 │   │   │   ├── Platform.py
 │   │   │   └── ReadyButton.py
-│   │   ├── Game.py
+│   │   ├── Game.py           # Original networked game
+│   │   ├── LocalGame.py      # Local two-player game
 │   │   ├── Server.py
 │   │   ├── Chat.py
 │   │   ├── settings.py
@@ -37,7 +40,7 @@ This document provides a comprehensive overview of the project's directory struc
 
 ### Game.py
 
-The main game file that brings everything together. It initializes the game, manages the game loop, handles player input, updates game state, and renders the game. Key responsibilities include:
+The main game file for the networked version. It initializes the game, manages the game loop, handles player input, updates game state, and renders the game. Key responsibilities include:
 
 - Game initialization and setup
 - Menu system management
@@ -48,7 +51,26 @@ The main game file that brings everything together. It initializes the game, man
 - Game state rendering and updates
 - Win/loss detection
 
-This is the entry point for players to start the game.
+This is the entry point for players to start the networked game.
+
+### LocalGame.py
+
+A modified version of the game that supports local two-player gameplay without requiring network connectivity. Features include:
+
+- Local game state management without a server
+- Support for two players on the same keyboard
+- Automatic creation of Player 2 after Player 1 is ready
+- Dedicated controls for each player (Arrow keys vs. WASD)
+- Same gameplay mechanics as the networked version
+
+### LocalGameLauncher.py
+
+Located in the root directory, this is the entry point for starting the local two-player game. It:
+
+- Sets up the Python path to properly import game modules
+- Changes the working directory for asset loading
+- Displays control information
+- Launches the LocalGame
 
 ### Server.py
 
@@ -98,6 +120,8 @@ The `characters/` directory contains a class for each playable character:
 
 - **Mario.py, Luigi.py, Yoshi.py, Popo.py, Nana.py, Link.py**: Each file defines a character class with unique attributes, animations, and attack patterns. All characters share a common base structure but have different sprites and potentially different abilities.
 
+- **LocalCharacter.py**: A base character class for the local two-player game that doesn't rely on hardcoded keyboard input. It provides a more modular approach to character control, allowing different key mappings for different players.
+
 Each character implements movement mechanics, attack patterns, health management, and collision detection.
 
 ## Menu System
@@ -121,32 +145,61 @@ The `objects/` directory contains classes for various game elements:
 
 ## Networking Architecture
 
-The game uses a client-server architecture with:
+The game offers two play modes:
 
-1. **UDP Communication** (via Server.py): For real-time game state updates where occasional packet loss is acceptable
-2. **TCP Communication** (via Chat.py): For reliable chat messaging where all messages must be delivered in order
+1. **Networked Mode**:
+   - Uses a client-server architecture with UDP for game state and TCP for chat
+   - Requires running the Server.py separately
+   - Supports 2-6 players across different computers
+
+2. **Local Mode**:
+   - Plays entirely on one computer
+   - Supports two players with different control schemes
+   - No network connectivity required
 
 ## How to Play
 
+### Networked Mode:
 1. Start the server: `python Server.py`
 2. Launch the game: `python Game.py <server_ip_address>`
 3. Enter your player name and select a character
 4. Wait for other players to join and press "Ready"
 5. Battle other players in the arena!
 
+### Local Mode:
+1. Run from the root directory: `python LocalGameLauncher.py`
+2. Enter a name and select a character for Player 1
+3. Player 2 will be automatically set up
+4. Battle in the arena with two players on the same keyboard!
+
 ## Controls
 
+### Networked Mode (All Players):
 - Arrow keys: Move character
 - Z: Weak attack
 - X: Heavy attack
 - Enter: Toggle chat mode
-- R: Request restart (after a game)
-- M: Return to main menu (after a game)
-- Q: Quit game (after a game)
+
+### Local Mode:
+**Player 1:**
+- Arrow keys: Move character
+- Z: Weak attack
+- X: Heavy attack
+
+**Player 2:**
+- WASD: Move character
+- G: Weak attack
+- H: Heavy attack
+
+**Both Modes (After a Game):**
+- R: Request restart
+- M: Return to main menu
+- Q: Quit game
 
 ## Development Notes
 
 - The game uses Pygame for rendering and input handling
 - Protocol Buffers are used for TCP message serialization in the chat system
-- The game supports 2-6 players in multiplayer mode
+- The networked game supports 2-6 players
+- The local game supports exactly 2 players on the same keyboard
 - Each game session tracks player stats like health, position, and status 

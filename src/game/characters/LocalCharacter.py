@@ -66,7 +66,9 @@ class LocalCharacter(pg.sprite.Sprite):
 
     def weakAttack(self):
         if self.health > 0 and not self.game.chatting:
-            collided_enemies = pg.sprite.spritecollide(self, self.game.enemy_sprites, False)
+            # Use the character's own enemy_sprites group if available, otherwise fall back to game.enemy_sprites
+            enemy_group = getattr(self, 'enemy_sprites', self.game.enemy_sprites)
+            collided_enemies = pg.sprite.spritecollide(self, enemy_group, False)
             for enemy in collided_enemies:
                 enemy.health -= self.weak
                 enemy.move = DAMAGED
@@ -76,7 +78,9 @@ class LocalCharacter(pg.sprite.Sprite):
 
     def heavyAttack(self):
         if self.health > 0 and not self.game.chatting:
-            collided_enemies = pg.sprite.spritecollide(self, self.game.enemy_sprites, False)
+            # Use the character's own enemy_sprites group if available, otherwise fall back to game.enemy_sprites
+            enemy_group = getattr(self, 'enemy_sprites', self.game.enemy_sprites)
+            collided_enemies = pg.sprite.spritecollide(self, enemy_group, False)
             for enemy in collided_enemies:
                 enemy.health -= self.heavy
                 enemy.move = DAMAGED
@@ -143,7 +147,7 @@ class LocalCharacter(pg.sprite.Sprite):
 
 # Create local character versions of each character
 
-# Mario
+# Mario - has maM1 through maM7
 class LocalMario(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
         walkR = [maS1, maM1, maM2, maM3, maM4, maM5, maM6, maM7]
@@ -165,10 +169,10 @@ class LocalMario(LocalCharacter):
             3, 6, 0.5  # weak damage, heavy damage, acceleration
         )
 
-# Luigi
+# Luigi - has luM1 through luM8
 class LocalLuigi(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
-        walkR = [luS1, luM1, luM2, luM3, luM4, luM5, luM6, luM7]
+        walkR = [luS1, luM1, luM2, luM3, luM4, luM5, luM6, luM7, luM8]
         walkL = [pg.transform.flip(image, True, False) for image in walkR]
         standR = luS1
         standL = pg.transform.flip(standR, True, False)
@@ -187,10 +191,10 @@ class LocalLuigi(LocalCharacter):
             4, 8, 0.4  # weak damage, heavy damage, acceleration
         )
 
-# Yoshi
+# Yoshi - has yoM1 through yoM8
 class LocalYoshi(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
-        walkR = [yoS1, yoM1, yoM2, yoM3, yoM4, yoM5, yoM6, yoM7]
+        walkR = [yoS1, yoM1, yoM2, yoM3, yoM4, yoM5, yoM6, yoM7, yoM8]
         walkL = [pg.transform.flip(image, True, False) for image in walkR]
         standR = yoS1
         standL = pg.transform.flip(standR, True, False)
@@ -212,7 +216,8 @@ class LocalYoshi(LocalCharacter):
 # Popo
 class LocalPopo(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
-        walkR = [poS1, poM1, poM2, poM3, poM4, poM5, poM6, poM7]
+        # Popo only has 3 movement sprites
+        walkR = [poS1, poM1, poM2, poM3]
         walkL = [pg.transform.flip(image, True, False) for image in walkR]
         standR = poS1
         standL = pg.transform.flip(standR, True, False)
@@ -234,7 +239,8 @@ class LocalPopo(LocalCharacter):
 # Nana
 class LocalNana(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
-        walkR = [naS1, naM1, naM2, naM3, naM4, naM5, naM6, naM7]
+        # Nana only has 3 movement sprites
+        walkR = [naS1, naM1, naM2, naM3]
         walkL = [pg.transform.flip(image, True, False) for image in walkR]
         standR = naS1
         standL = pg.transform.flip(standR, True, False)
@@ -253,10 +259,10 @@ class LocalNana(LocalCharacter):
             5.7, 11, 0.22  # weak damage, heavy damage, acceleration
         )
 
-# Link
+# Link - has liM1 through liM10
 class LocalLink(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
-        walkR = [liS1, liM1, liM2, liM3, liM4, liM5, liM6, liM7]
+        walkR = [liS1, liM1, liM2, liM3, liM4, liM5, liM6, liM7, liM8, liM9, liM10]
         walkL = [pg.transform.flip(image, True, False) for image in walkR]
         standR = liS1
         standL = pg.transform.flip(standR, True, False)
