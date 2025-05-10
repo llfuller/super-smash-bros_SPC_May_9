@@ -5,15 +5,41 @@ This example demonstrates how to create a LangChain agent that can spawn Bob-Omb
 in the Super Smash Bros game using custom tools.
 """
 
-from langchain.agents import Tool, AgentExecutor, create_react_agent
-from langchain.prompts import PromptTemplate
-from langchain_openai import ChatOpenAI
 import json
 import os
 
-# Path to the bobomb entity template
-BOBOMB_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-                                   "entities", "bobomb_entity.json")
+from langchain.agents import Tool, AgentExecutor, create_react_agent
+from langchain.prompts import PromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain.tools import StructuredTool
+from langchain.agents import create_openai_functions_agent, AgentExecutor
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.schema.messages import SystemMessage
+from dotenv import load_dotenv
+from langchain_community.agent_toolkits.load_tools import load_tools
+from langchain.agents import initialize_agent
+from langchain.agents import AgentType
+from langchain_community.llms import OpenAI
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+from langchain.tools import BaseTool
+from typing import Optional, Type
+from pydantic import BaseModel, Field
+
+
+# Load environment variables
+load_dotenv()
+
+# Initialize OpenAI API key
+os.environ["OPENAI_API_KEY"] = "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"
+
+
+class BobombInput(BaseModel):
+    position_x: int = Field(default=300, description="X position of the Bob-omb")
+    position_y: int = Field(default=100, description="Y position of the Bob-omb")
+    fuse_time: int = Field(default=180, description="Time before the Bob-omb explodes")
+    damage: int = Field(default=25, description="Damage caused by the explosion")
+    explosion_radius: int = Field(default=100, description="Radius of the explosion")
 
 def create_bobomb(position_x=300, position_y=100, fuse_time=180, damage=25, explosion_radius=100):
     """
@@ -48,6 +74,11 @@ def create_bobomb(position_x=300, position_y=100, fuse_time=180, damage=25, expl
     
     return bobomb_data
 
+
+# Path to the bobomb entity template
+BOBOMB_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+                                   "entities", "bobomb_entity.json")
+
 def get_bobomb_template():
     """Retrieves the Bob-Omb entity template from the JSON file."""
     try:
@@ -62,36 +93,63 @@ def get_bobomb_template():
         print(f"Error loading Bob-Omb template: {e}")
         return None
 
-# Define the tools for the agent
-tools = [
-    Tool(
-        name="SpawnBobOmb",
-        func=create_bobomb,
-        description="Spawns a Bob-Omb in the game. Parameters: position_x (int), position_y (int), "
-                    "fuse_time (int), damage (int), explosion_radius (int)"
-    )
-]
 
-# Create a prompt template for the agent
-prompt = PromptTemplate.from_template(
-    """You are an AI assistant that helps manage items in a Super Smash Bros game.
-    You can spawn Bob-Ombs at specific locations with custom properties.
-    
-    {input}
-    """
+# Define the tools for the agent
+bobomb_tool = StructuredTool.from_function(
+    func=create_bobomb,
+    name="CreateBobomb",
+    description="Create a Bob-omb with specific position, fuse time, damage, and explosion radius.",
+    args_schema=BobombInput
 )
 
-# Initialize the language model
-llm = ChatOpenAI(temperature=0)
+tools=[bobomb_tool]
 
-# Create the agent
-agent = create_react_agent(llm, tools, prompt)
+llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-1106")
+system_prompt = SystemMessage(
+    content=(
+        "You are an AI assistant that helps manage items in a Super Smash Bros game. "
+        "You can spawn Bob-Ombs at specific locations with custom properties such as fuse time, damage, and explosion radius."
+    )
+)
 
-# Create the agent executor
+prompt = ChatPromptTemplate.from_messages([
+    system_prompt,
+    ("user", "{input}"),
+    MessagesPlaceholder(variable_name="agent_scratchpad")
+])
+
+
+# agent = initialize_agent(
+#     tools=[bobomb_tool],
+#     llm=llm,
+#     agent=AgentType.OPENAI_FUNCTIONS,
+#     verbose=True
+# )
+agent = create_openai_functions_agent(llm=llm, tools=tools, prompt=prompt)
+
 agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
-# Example usage
+# # Create a prompt template for the agent
+# prompt = PromptTemplate.from_template(
+#     """You are an AI assistant that helps manage items in a Super Smash Bros game.
+#     You can spawn Bob-Ombs at specific locations with custom properties.
+    
+#     {input}
+#     """
+# )
+
+# # Create the agent
+# agent = create_react_agent(llm, tools, prompt)
+
+# # Create the agent executor
+# agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+
+# # Example usage
 if __name__ == "__main__":
+
+    # response = agent_executor.invoke("Create a Bob-omb at position 500, 250 with a short fuse of 60 seconds and radius of 200.")
+    # print(response)
+
     # Example 1: Basic Bob-Omb spawning
     result1 = agent_executor.invoke(
         {"input": "Create a Bob-Omb at position (400, 200) with default properties"}
