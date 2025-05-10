@@ -18,28 +18,12 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 # Just make sure we're in the game directory (already are, but to be safe)
 os.chdir(current_dir)
 
-# Check for command line arguments
-if len(sys.argv) > 1:
-    # Check for GIANT MODE flag
-    if '--giant-mode' in sys.argv:
-        print("🔥 GIANT MODE ENABLED! 🔥")
-        # Import settings to set GIANT_MODE_ENABLED
-        from settings import *
-        # Enable GIANT MODE
-        sys.modules['settings'].GIANT_MODE_ENABLED = True
-        
 # Initialize pygame to check for controllers
 pg.init()
 pg.joystick.init()
 
 print("=== Super Smash Bros - Local Two-Player Edition Launcher ===")
 print()
-
-# Display GIANT MODE status
-from settings import GIANT_MODE_ENABLED
-if GIANT_MODE_ENABLED:
-    print("🔥 GIANT MODE ACTIVE - Characters will be supersized! 🔥")
-    print()
 
 # Check for controllers
 controller_found = False
@@ -127,8 +111,6 @@ print("- Character sizes match real Melee proportions")
 print("- Realistic knockback formula based on damage percentage")
 print("- Accurate movement speeds and acceleration values")
 print("- Shield blocking to prevent damage (visible as colored bubble)")
-print("- GIANT MODE: Run with '--giant-mode' flag for supersized characters!")
-print("  Example: python LocalGameLauncher.py --giant-mode")
 print()
 print("Shield Troubleshooting:")
 print("- For Pro Controller: Use L/R buttons (9/10) to activate shield")

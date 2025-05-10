@@ -13,7 +13,7 @@ import sys
 sys.path.append("..")
 # Import everything from melee_physics to ensure all constants are available
 from melee_physics import *
-from settings import *  # Import constants from settings including GIANT_MODE settings
+from settings import *  # Import constants from settings
 
 # Also add LANDING since it's defined in LocalCharacter but used here
 LANDING = 'landing'
@@ -31,17 +31,9 @@ class MeleePhysicsMixin:
         """Initialize Melee physics values"""
         self.character_type = character_type.lower()
         
-        # Set character dimensions - adjust for GIANT MODE if enabled
-        base_height = MARIO_HEIGHT if self.character_type == 'mario' else MARIO_HEIGHT
-        base_width = MARIO_WIDTH if self.character_type == 'mario' else MARIO_WIDTH
-        
-        # Apply GIANT MODE scaling to dimensions if enabled
-        if hasattr(settings, 'GIANT_MODE_ENABLED') and settings.GIANT_MODE_ENABLED:
-            self.height_units = base_height * settings.GIANT_MODE_SCALE_FACTOR
-            self.width_units = base_width * settings.GIANT_MODE_SCALE_FACTOR
-        else:
-            self.height_units = base_height
-            self.width_units = base_width
+        # Set character dimensions
+        self.height_units = MARIO_HEIGHT if self.character_type == 'mario' else MARIO_HEIGHT
+        self.width_units = MARIO_WIDTH if self.character_type == 'mario' else MARIO_WIDTH
         
         # Initialize physics state variables
         self.dash_frame_counter = 0  # Track frames in dash state
@@ -58,17 +50,8 @@ class MeleePhysicsMixin:
         self.air_physics = AIR_MOVEMENT.get(self.character_type, AIR_MOVEMENT['generic'])
         self.weight = KNOCKBACK['weight'].get(self.character_type, KNOCKBACK['weight']['generic'])
         
-        # Adjust physics values for GIANT MODE if enabled
-        if hasattr(settings, 'GIANT_MODE_ENABLED') and settings.GIANT_MODE_ENABLED:
-            # Giant characters are typically slower but have more powerful attacks
-            self.weight *= 1.5  # Make giant characters heavier (more resistant to knockback)
-            
-            # Modify ground acceleration for GIANT MODE
-            base_accel = self.ground_physics['ground_accel_base'] + self.ground_physics['ground_accel_additional']
-            self.acce = base_accel * 0.85  # Slightly reduce acceleration for giants
-        else:
-            # Override acceleration with standard Melee values
-            self.acce = self.ground_physics['ground_accel_base'] + self.ground_physics['ground_accel_additional']
+        # Override acceleration with Melee values
+        self.acce = self.ground_physics['ground_accel_base'] + self.ground_physics['ground_accel_additional']
         
         # Print debug info
         print(f"Initialized Melee physics for {self.name} as {character_type}")
@@ -76,8 +59,6 @@ class MeleePhysicsMixin:
         print(f"  Air Speed: {self.air_physics['air_speed']}")
         print(f"  Gravity: {self.air_physics['gravity']}")
         print(f"  Weight: {self.weight}")
-        if hasattr(settings, 'GIANT_MODE_ENABLED') and settings.GIANT_MODE_ENABLED:
-            print(f"  GIANT MODE ENABLED - Size multiplier: {settings.GIANT_MODE_SCALE_FACTOR}")
     
     def update_melee_physics(self):
         """Update physics state based on Melee rules"""
