@@ -12,6 +12,7 @@ import sys
 import pygame as pg
 import json
 import copy
+import random
 
 # characters
 from characters.Mario import Mario
@@ -71,6 +72,9 @@ class LocalGame:
         self.current_player_index = 0  # which player is currently selecting (0 or 1)
         self.player_count = 0  # number of ready players
         self.name_available = True  # for compatibility with menu code
+        
+        # Character options for auto-selection of Player 2
+        self.character_options = [MARIO, LUIGI, YOSHI, POPO, NANA, LINK]
 
         # converted background images for optimized game loop
         self.arena_bg = ARENA_BG.convert()
@@ -90,6 +94,9 @@ class LocalGame:
         
         # Required for menu compatibility
         self.curr_player = ""  # updated during character selection
+        
+        # Auto player 2 setup
+        self.auto_player2 = True  # Flag to enable/disable auto-setup of player 2
 
     def run(self):
         # check for the current menu depending on the status
@@ -164,20 +171,20 @@ class LocalGame:
                 # attacks for player 1 (arrow keys + Z/X)
                 if event.type == pg.KEYDOWN:
                     if event.key == pg.K_z:
-                        if self.player_names[0] in self.players:
+                        if self.player_names[0] in self.players and 'sprite' in self.players[self.player_names[0]]:
                             self.players[self.player_names[0]]['sprite'].weakAttack()
                     
                     elif event.key == pg.K_x:
-                        if self.player_names[0] in self.players:
+                        if self.player_names[0] in self.players and 'sprite' in self.players[self.player_names[0]]:
                             self.players[self.player_names[0]]['sprite'].heavyAttack()
                     
                     # attacks for player 2 (WASD + G/H)
                     elif event.key == pg.K_g:
-                        if self.player_names[1] in self.players:
+                        if self.player_names[1] in self.players and 'sprite' in self.players[self.player_names[1]]:
                             self.players[self.player_names[1]]['sprite'].weakAttack()
                     
                     elif event.key == pg.K_h:
-                        if self.player_names[1] in self.players:
+                        if self.player_names[1] in self.players and 'sprite' in self.players[self.player_names[1]]:
                             self.players[self.player_names[1]]['sprite'].heavyAttack()
                     
                     # restart game after match ends
@@ -202,7 +209,7 @@ class LocalGame:
                             quit()
 
             # Handle player 1 movement (arrow keys)
-            if self.player_names[0] in self.players and self.players[self.player_names[0]]['health'] > 0 and self.playing:
+            if self.player_names[0] in self.players and 'sprite' in self.players[self.player_names[0]] and self.players[self.player_names[0]]['health'] > 0 and self.playing:
                 player1 = self.players[self.player_names[0]]
                 sprite1 = player1['sprite']
                 
@@ -238,7 +245,7 @@ class LocalGame:
                     player1['walk_c'] = '0'
             
             # Handle player 2 movement (WASD)
-            if self.player_names[1] in self.players and self.players[self.player_names[1]]['health'] > 0 and self.playing:
+            if self.player_names[1] in self.players and 'sprite' in self.players[self.player_names[1]] and self.players[self.player_names[1]]['health'] > 0 and self.playing:
                 player2 = self.players[self.player_names[1]]
                 sprite2 = player2['sprite']
                 
@@ -381,6 +388,48 @@ class LocalGame:
 
     # ========================= LOCAL SERVER METHODS =========================
     
+    # Automatically set up player 2 after player 1 selects their character
+    def setupPlayer2(self):
+        if not self.auto_player2:
+            return
+            
+        # Create a name for Player 2 that's different from Player 1
+        player2_name = "Player 2"
+        if player2_name == self.player_names[0]:
+            player2_name = "Player Two"
+            
+        # Choose a random character that's different from Player 1's character
+        available_chars = [char for char in self.character_options if char != self.player_characters[0]]
+        if not available_chars:  # Just in case
+            available_chars = self.character_options
+        player2_char = random.choice(available_chars)
+        
+        # Connect player 2
+        self.player_names[1] = player2_name
+        self.players[player2_name] = {
+            'name': player2_name,
+            'character': player2_char,
+            'status': 'ready',  # Auto-ready
+            'health': '100',
+            'xPos': '0',
+            'yPos': '0',
+            'direc': 'left',
+            'walk_c': '0',
+            'move': 'stand'
+        }
+        
+        # Set player 2's character and status
+        self.player_characters[1] = player2_char
+        self.player_statuses[1] = 'ready'
+        
+        # Update player count
+        self.player_count = 2
+        
+        print(f"Auto-setup Player 2: {player2_name} with character {player2_char}")
+        
+        # Return so the startGame can be called
+        return True
+    
     # Menu interface compatibility methods
     def connectPlayer(self, name):
         if self.current_player_index < 2:
@@ -440,6 +489,11 @@ class LocalGame:
             # For tracking in our local player state
             if name == self.player_names[0]:
                 self.player_statuses[0] = status
+                
+                # If we're player 1 and we just got ready, set up player 2 automatically
+                if status == 'ready' and self.auto_player2:
+                    self.setupPlayer2()
+                    
             elif name == self.player_names[1]:
                 self.player_statuses[1] = status
             
@@ -448,6 +502,10 @@ class LocalGame:
             for player_status in self.player_statuses:
                 if player_status == 'ready':
                     self.player_count += 1
+                    
+            # Start game if both players are ready
+            if self.player_count == 2:
+                self.startGame()
     
     def startGame(self):
         # Only start if both players are ready
