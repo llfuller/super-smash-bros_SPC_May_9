@@ -14,7 +14,7 @@ GAME_WIDTH = 700
 HEIGHT = 700
 BG_SIZE = (FULL_WIDTH, HEIGHT) 
 ORIGIN = (0,0)
-FPS = 60
+FPS = 60  # Melee runs at exactly 60 FPS
 
 # game statuses
 INTRO = 0

@@ -5,6 +5,8 @@ import pygame as pg
 sys.path.append("..")
 from settings import *
 from images import *
+from characters.MeleePhysics import MeleePhysicsMixin  # Import the mixin
+from melee_physics import KNOCKBACK_EXAMPLES, calculate_knockback  # Import needed constants
 
 # Add new animation state
 LANDING = 'landing'
@@ -25,7 +27,7 @@ BASE_KNOCKBACK_Y = 2.0  # Base vertical knockback
 vec = pg.math.Vector2
 
 # This is a modified base character class that doesn't rely on hardcoded keyboard input
-class LocalCharacter(pg.sprite.Sprite):
+class LocalCharacter(pg.sprite.Sprite, MeleePhysicsMixin):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move, 
                  images_walk_r, images_walk_l, image_stand_r, image_stand_l,
                  image_weak_r, image_weak_l, image_heavy_r, image_heavy_l,
@@ -41,8 +43,8 @@ class LocalCharacter(pg.sprite.Sprite):
         self.damage_percent = 0.0  # Damage percentage (Smash Bros style)
         self.weak = weak_damage
         self.heavy = heavy_damage
-        # Double the horizontal acceleration for faster movement
-        self.acce = acceleration * MOVEMENT_SPEED_MULTIPLIER
+        # Keep the original acceleration value
+        self.acce = acceleration
         
         # Position and movement
         self.pos = vec(pos[0], pos[1])  # Convert to Vector2 for consistency
@@ -50,13 +52,24 @@ class LocalCharacter(pg.sprite.Sprite):
         self.walk_c = walk_c if walk_c is not None else 0
         self.move = move
         
+        # Initialize last ground position tracker
+        # This helps prevent characters from falling through platforms
+        self.last_ground_y = pos[1]  # Start with spawn position as ground
+        self.initialized_platform_check = False
+        
         # Animation state variables
         self.animation_frame_counter = 0
         self.animation_locked = False
         self.animation_lock_timer = 0
         self.animation_lock_duration = 0
-        self.in_air = False
+        self.in_air = False  # Start on the ground by default
         self.landing_lag = 0
+        
+        # Input state variables (for Melee physics)
+        self.moving_left = False
+        self.moving_right = False
+        self.is_jumping = False
+        self.is_fast_falling = False
         
         # Platform drop-through variables
         self.drop_through = False  # Flag set by controller when down is pressed
@@ -101,6 +114,15 @@ class LocalCharacter(pg.sprite.Sprite):
         
         # Input flag - whether this character should be controlled by keyboard
         self.process_input = False
+        
+        # Initialize Melee physics based on character name
+        character_type = 'generic'
+        if 'mario' in name.lower():
+            character_type = 'mario'
+        elif 'luigi' in name.lower():
+            character_type = 'luigi'
+        
+        self.init_melee_physics(character_type)
     
     def scale_image(self, image):
         """Scale an image to the desired size (2x)"""
@@ -111,61 +133,79 @@ class LocalCharacter(pg.sprite.Sprite):
         return pg.transform.scale(image, (new_width, new_height))
 
     def jump(self):
-        # Only allow jump if not animation locked
+        # Debug info to see if this function is getting called
+        print(f"{self.name} attempting to jump. Currently in_air: {self.in_air}, animation_locked: {self.animation_locked}")
+        
+        # Make sure we can actually jump
         if self.animation_locked:
-            # Cannot jump during landing lag or other locked animations
-            return
+            print(f"{self.name} can't jump because animation is locked")
+            return False
             
-        # Only allow jumping if on the ground (not in air)
         if self.in_air:
-            return
-            
-        self.rect.x += 1
-        collision = pg.sprite.spritecollide(self, self.game.platforms, False)
-        self.rect.x -= 1
-        if collision:
-            # Use normal jump velocity × jump height factor for proper jump height
-            self.vel.y = -VEL * JUMP_HEIGHT_FACTOR
-            self.in_air = True
+            print(f"{self.name} can't jump because already in air")
+            return False
+        
+        # Apply a single upward impulse (don't change horizontal velocity)
+        self.vel.y = -16  # Reduced from -20 for lower jumps
+        self.in_air = True
+        self.is_jumping = True
+        
+        # Clear any platform we were on
+        self.last_ground_y = None
+        
+        print(f"{self.name} jumped with velocity {self.vel.y}")
+        return True
 
     def take_damage(self, damage, attacker_pos_x):
         """
         Apply damage (increases percentage) and calculate knockback based on percentage
         Returns the new damage percentage
         """
-        # Increase damage percentage
-        self.damage_percent += damage
-        
-        # Calculate knockback based on damage percentage
-        # Higher percentage = more knockback
-        knockback_multiplier = 1.0 + (self.damage_percent / 100.0)
-        
-        # Determine horizontal knockback direction
-        knockback_direction = 1 if attacker_pos_x < self.pos.x else -1
-        
-        # Apply knockback
-        knockback_x = BASE_KNOCKBACK_X * knockback_multiplier * knockback_direction
-        knockback_y = -BASE_KNOCKBACK_Y * knockback_multiplier  # Negative for upward
-        
-        # Apply to velocity
-        self.vel.x = knockback_x
-        self.vel.y = knockback_y
-        
-        # Enter damage state
-        self.move = DAMAGED
-        
-        # Apply animation lock based on percentage (higher = longer stun)
-        stun_duration = int(self.damage_stun * knockback_multiplier)
-        self.animation_locked = True
-        self.animation_lock_timer = 0
-        self.animation_lock_duration = stun_duration
-        
-        # Set in_air since knockback will launch the player
-        self.in_air = True
-        
-        print(f"{self.name} took {damage}%, now at {self.damage_percent}% with knockback {knockback_x:.2f}, {knockback_y:.2f}")
-        
-        return self.damage_percent
+        try:
+            # Use Melee physics for damage and knockback
+            # For weak attacks, use low knockback growth
+            # For heavy attacks, use higher knockback growth and base knockback
+            if damage <= self.weak:
+                kb_growth = KNOCKBACK_EXAMPLES['weak']['knockback_growth'] 
+                base_kb = KNOCKBACK_EXAMPLES['weak']['base_knockback']
+            elif damage <= self.heavy:
+                kb_growth = KNOCKBACK_EXAMPLES['medium']['knockback_growth']
+                base_kb = KNOCKBACK_EXAMPLES['medium']['base_knockback']
+            else:
+                kb_growth = KNOCKBACK_EXAMPLES['strong']['knockback_growth']
+                base_kb = KNOCKBACK_EXAMPLES['strong']['base_knockback']
+            
+            # Use 45 degree angle for all attacks for now
+            angle = 45
+            
+            # Use Melee physics for damage calculation
+            return self.take_damage_with_melee_physics(damage, kb_growth, base_kb, attacker_pos_x, angle)
+        except Exception as e:
+            # Fallback to a basic implementation if there's an error
+            print(f"Error in take_damage: {e}, using fallback method")
+            
+            # Basic damage and knockback
+            self.damage_percent += damage
+            
+            # Simple knockback based on damage percentage
+            knockback_multiplier = 1.0 + (self.damage_percent / 100.0)
+            
+            # Determine horizontal knockback direction
+            knockback_direction = 1 if attacker_pos_x < self.pos.x else -1
+            
+            # Apply simple knockback
+            self.vel.x = 5 * knockback_multiplier * knockback_direction
+            self.vel.y = -4 * knockback_multiplier  # Negative for upward
+            
+            # Set state
+            self.in_air = True
+            self.move = DAMAGED
+            self.animation_locked = True
+            self.animation_lock_timer = 0
+            self.animation_lock_duration = 20  # Fixed stun duration
+            
+            print(f"{self.name} took {damage}% damage, now at {self.damage_percent}%")
+            return self.damage_percent
     
     def weakAttack(self):
         # Only allow attack if not already in an attack animation or damaged
@@ -208,6 +248,28 @@ class LocalCharacter(pg.sprite.Sprite):
                 self.game.attackPlayer(enemy.name, self.heavy, DAMAGED, self.pos.x)
     
     def update(self):
+        # Disable emergency reset - we have a better solution now
+        # Save previous position and state for collision checking
+        previous_pos = vec(self.pos.x, self.pos.y)
+        was_in_air = self.in_air
+        was_knockback = getattr(self, 'is_knockback_air', False)
+        
+        # Add debug every ~60 frames if in knockback
+        if hasattr(self, 'is_knockback_air') and self.is_knockback_air and hasattr(self.game, 'current_frame'):
+            if self.game.current_frame % 60 == 0:
+                print(f"KNOCKBACK DEBUG: {self.name} in knockback, pos=({self.pos.x}, {self.pos.y}), vel=({self.vel.x}, {self.vel.y})")
+                print(f"KNOCKBACK DEBUG: hitstun={getattr(self, 'hitstun_frames', 0)}, in_air={self.in_air}, dropping={getattr(self, 'is_dropping_through', False)}")
+        
+        # First update Melee physics - but don't let it override our gravity
+        was_gravity = self.acc.y
+        self.update_melee_physics()
+        self.update_l_cancel_window()
+        
+        # CRITICAL: Handle hitstun and knockback state correctly
+        # Initialize the knockback flag if needed
+        if not hasattr(self, 'is_knockback_air'):
+            self.is_knockback_air = False
+            
         # Handle animation lock timers
         if self.animation_locked:
             self.animation_lock_timer += 1
@@ -217,78 +279,206 @@ class LocalCharacter(pg.sprite.Sprite):
                 if self.move in [WEAK_ATTACK, HEAVY_ATTACK, DAMAGED, LANDING]:
                     self.move = STAND
         
-        # Update physics
-        self.acc = vec(0, 0.5)  # Gravity
-        self.acc.x += self.vel.x * FRIC
-        self.vel += self.acc
-        self.pos += self.vel + 0.5 * self.acc
-
-        # Update collision rectangle for collision detection
+        # CRITICAL: Always check if we're actually on solid ground
+        if not self.in_air:
+            # Check if there's a platform directly under us
+            self.check_ground_beneath()
+            
+            # PLATFORM DROP-THROUGH LOGIC: Check if we should initiate drop-through
+            if self.drop_through:
+                # Check for a platform directly under our feet
+                current_platform = self.get_platform_at_position(self.pos.x, self.pos.y)
+                if current_platform and current_platform.type == 'platform':
+                    # This is a valid platform we can drop through
+                    print(f"{self.name} initiating drop-through at y={self.pos.y}")
+                    
+                    # Force character into air state
+                    self.in_air = True
+                    self.is_dropping_through = True
+                    self.dropping_through_platforms.add(current_platform)
+                    
+                    # Give slight downward velocity to start fall
+                    self.vel.y = 1.5
+                    
+                    # Clear ground state
+                    self.last_ground_y = None
+                    if hasattr(self, 'last_platform'):
+                        delattr(self, 'last_platform')
+        
+        # Special handling for knockback - NEVER allow drop-through in hitstun
+        if self.is_knockback_air:
+            # Reset any potential drop-through flags during knockback
+            self.is_dropping_through = False
+            self.dropping_through_platforms = set()
+        
+        # Apply horizontal movement - always allow this, but with different physics in air
+        horizontal_update = self.vel.x + 0.5 * self.acc.x
+        self.pos.x += horizontal_update
+        
+        # Apply vertical movement - gravity when in air
+        if self.in_air:
+            # Apply gravity - a constant value rather than physics calculation
+            self.acc.y = 0.5  # Constant gravity
+            self.vel.y += self.acc.y  # Accumulate gravity
+            
+            # Cap falling speed to prevent excessive velocity
+            if self.vel.y > 10:
+                self.vel.y = 10
+                
+            # Update vertical position
+            self.pos.y += self.vel.y
+        else:
+            # Reset vertical velocity when on ground
+            self.vel.y = 0
+            self.acc.y = 0
+            
+            # Ensure position is at ground level if we have it
+            if hasattr(self, 'last_ground_y') and self.last_ground_y is not None:
+                self.pos.y = self.last_ground_y
+        
+        # Perform collision detection - first update the rect
         self.rect = self.image.get_rect()
         self.rect.midbottom = self.pos
-
-        # Detect landing from air
-        was_in_air = self.in_air
-        if self.vel.y > 0:  # Falling
-            # Check for platforms
-            collision = pg.sprite.spritecollide(self, self.game.platforms, False)
+        
+        # Always check for platform collisions
+        # Check for platforms
+        collision = pg.sprite.spritecollide(self, self.game.platforms, False)
+        
+        # Debug output for drop-through state
+        if self.drop_through and not self.in_air:
+            print(f"{self.name} wants to drop through, down key is pressed")
+        
+        # Update drop-through platform tracking
+        if self.dropping_through_platforms:
+            # Clear platforms that we're no longer in contact with
+            platforms_to_remove = set()
+            for platform in self.dropping_through_platforms:
+                # Remove platform if we're below it or no longer colliding
+                if self.pos.y > platform.rect.bottom + 10 or platform not in collision:
+                    platforms_to_remove.add(platform)
             
-            # Clear drop-through for platforms that are no longer in collision
-            if self.dropping_through_platforms:
-                platforms_to_remove = set()
-                for platform in self.dropping_through_platforms:
-                    if platform not in collision:
-                        platforms_to_remove.add(platform)
-                
-                self.dropping_through_platforms -= platforms_to_remove
-                
-                # If no platforms are being dropped through anymore, reset the state
-                if not self.dropping_through_platforms:
-                    self.is_dropping_through = False
+            # Remove platforms we've fully dropped through
+            self.dropping_through_platforms -= platforms_to_remove
             
+            # If no more platforms being dropped through, reset state
+            if not self.dropping_through_platforms:
+                if self.is_dropping_through:
+                    print(f"{self.name} finished drop-through")
+                self.is_dropping_through = False
+        
+        # CRITICAL: Prevent infinite loop - clear collision if we just landed
+        should_check_collision = True
+        if not was_in_air and not self.in_air and hasattr(self, '_last_landing_frame'):
+            if self.game.current_frame - self._last_landing_frame < 2:
+                # Skip collision check if we just landed in the last frame
+                should_check_collision = False
+        
+        if should_check_collision:
             # Filter platforms:
             # 1. Always collide with floors
             # 2. For regular platforms, handle drop-through logic
+            # 3. Allow passing through from below
             filtered_collision = []
             for platform in collision:
-                # Check if we can drop through this platform
-                if self.can_drop_through(platform):
-                    # Add the platform to the set being dropped through
-                    self.dropping_through_platforms.add(platform)
-                    # Set the drop-through state to active
-                    self.is_dropping_through = True
-                    # Skip collision with this platform
-                    print(f"Player {self.name} dropping through platform while falling")
-                else:
-                    # Can't drop through, handle normal collision
+                # Check if we're currently dropping through this platform
+                if platform in self.dropping_through_platforms:
+                    continue
+                
+                # CRITICAL: When in knockback (hitstun), don't drop through ANY platforms
+                if hasattr(self, 'is_knockback_air') and self.is_knockback_air:
+                    # During knockback, collide with ALL platforms
                     filtered_collision.append(platform)
+                    continue
+                    
+                # Check if we're initiating a drop-through
+                if self.can_drop_through(platform, previous_pos):
+                    print(f"{self.name} will drop through platform at y={platform.rect.top}")
+                    self.dropping_through_platforms.add(platform)
+                    self.is_dropping_through = True
+                    continue
+                
+                # Check if we're passing through from below
+                if self.is_passing_through_from_below(platform, previous_pos):
+                    self.dropping_through_platforms.add(platform)
+                    self.is_dropping_through = True
+                    continue
+                
+                # Can't pass through, handle normal collision
+                filtered_collision.append(platform)
             
             if filtered_collision:
-                # Landing on a platform or floor
-                if was_in_air:
-                    self.apply_landing_lag()
+                # Sort platforms by y-position to find the highest one we're colliding with
+                filtered_collision.sort(key=lambda p: p.rect.top)
+                platform = filtered_collision[0]
                 
-                self.pos[1] = filtered_collision[0].rect.top + 1
-                self.vel[1] = 0
-                self.in_air = False
-                
-                # Reset drop-through state when landing
-                self.is_dropping_through = False
-                self.dropping_through_platforms.clear()
+                # Check if we need to handle landing/standing on platform
+                if self.vel.y >= 0:  # Only land when moving downward or still
+                    # Get position of character's feet
+                    feet_y = self.pos.y
+                    platform_top = platform.rect.top + 4  # Adjusted top with offset
+                    
+                    # Check if we're landing from above (with tolerance)
+                    if previous_pos.y <= platform.rect.top:
+                        # Apply landing lag if we were in the air
+                        if was_in_air:
+                            # Use Melee physics for landing lag
+                            was_aerial_attack = self.move in [WEAK_ATTACK, HEAVY_ATTACK]
+                            self.apply_landing_lag_with_melee_physics(was_aerial_attack)
+                        
+                        # Force position onto the platform with adjusted offset to make character visually on the platform
+                        self.pos.y = platform_top  # Use the adjusted platform top
+                        self.vel.y = 0
+                        self.in_air = False
+                        
+                        # Store the ground y-position and platform reference
+                        self.last_ground_y = self.pos.y
+                        self.last_platform = platform
+                        self._last_landing_frame = getattr(self.game, 'current_frame', 0)
+                        
+                        # Reset jumping and fast falling flags
+                        self.is_jumping = False
+                        self.is_fast_falling = False
+                        
+                        # Reset drop-through state
+                        self.is_dropping_through = False
+                        self.dropping_through_platforms.clear()
+                        
+                        # Reset knockback state if landing after knockback
+                        if hasattr(self, 'is_knockback_air') and self.is_knockback_air:
+                            self.is_knockback_air = False
+                        
+                        if was_in_air:
+                            # Only log if actually landing from air
+                            print(f"{self.name} landed on platform at y={self.pos.y}")
+                elif self.vel.y < 0:  # Moving upward
+                    # Hit platform from below, reset vertical velocity
+                    self.vel.y = 0
             else:
-                # No valid platforms to land on, remain in the air
-                self.in_air = True
-        else:
-            # In the air if velocity is upward
-            self.in_air = True
-            
-            # Also check if we need to clear drop-through state
-            # This handles the case where the player jumps through a platform
-            collision = pg.sprite.spritecollide(self, self.game.platforms, False)
-            if not collision:
-                # No collision with any platform, clear the drop-through state
-                self.is_dropping_through = False
-                self.dropping_through_platforms.clear()
+                # No valid platforms to land on - double-check edge cases
+                # Do an additional check for "walking off edge" cases
+                if not self.in_air and self.vel.y >= 0:
+                    # We should be in air but somehow aren't - verify with precise detection
+                    feet_x = self.pos.x
+                    feet_y = self.pos.y
+                    feet_width = 5
+                    
+                    # Look for ANY platform below us that would prevent a fall
+                    found_support = False
+                    for platform in self.game.platforms:
+                        # Check horizontal bounds
+                        if platform.rect.left - feet_width/2 <= feet_x <= platform.rect.right + feet_width/2:
+                            # Check if platform is at our feet or slightly below
+                            platform_top = platform.rect.top
+                            if abs(feet_y - platform_top) < 8:  # Within 8 pixels (slight tolerance)
+                                found_support = True
+                                break
+                    
+                    if not found_support:
+                        # We're legitimately off an edge
+                        print(f"{self.name} has no support below - setting to air state")
+                        self.in_air = True
+                        self.vel.y = 0.1  # Small initial velocity
+                        self.last_ground_y = None
         
         # Update sprite image based on current state
         self.update_sprite_image()
@@ -296,29 +486,71 @@ class LocalCharacter(pg.sprite.Sprite):
         # Final update to collision rectangle
         self.rect = self.image.get_rect()
         self.rect.midbottom = self.pos
+    
+    def check_ground_beneath(self):
+        """Check if there's ground beneath the character"""
+        # Only run this check for grounded characters
+        if self.in_air:
+            return
+            
+        # CRITICAL: Get the EXACT position of the character's feet
+        feet_x = self.pos.x
+        feet_y = self.pos.y  # This is already the bottom of the character
         
+        # Create a more precise hitbox for ground detection
+        feet_width = 5  # Narrow feet hitbox (pixels)
+        
+        # Check for platforms directly beneath the character's feet
+        left_edge = feet_x - feet_width/2
+        right_edge = feet_x + feet_width/2
+        
+        # Debug visualization - uncomment if needed
+        # self.game.screen.fill((255, 0, 0), pg.Rect(left_edge, feet_y, feet_width, 5))
+        
+        # Check all platforms
+        found_platform = False
+        for platform in self.game.platforms:
+            # Only check if feet are within horizontal bounds of the platform
+            if (left_edge <= platform.rect.right and 
+                right_edge >= platform.rect.left):
+                
+                # Check if the platform is at the right height (accounting for the 4-pixel offset)
+                platform_top = platform.rect.top + 4
+                if abs(feet_y - platform_top) < 5:  # Within 5 pixels of platform's adjusted top
+                    found_platform = True
+                    # We're on this platform
+                    break
+        
+        # If no platform found beneath us, start falling
+        if not found_platform:
+            # Verify we're actually off the edge by doing a deeper check
+            # Look for ANY platform below us 
+            for platform in self.game.platforms:
+                if (left_edge <= platform.rect.right and 
+                    right_edge >= platform.rect.left and
+                    platform.rect.top > feet_y and
+                    platform.rect.top < feet_y + 100):  # Check up to 100 pixels below
+                    # There's a platform below, don't trigger fall yet - the character is just transitioning between platforms
+                    return
+            
+            # We're genuinely off an edge with nothing below
+            print(f"{self.name} is off edge at ({feet_x}, {feet_y}) - will fall")
+            self.in_air = True
+            self.vel.y = 0.1  # Small initial downward velocity
+    
+    def get_platform_at_position(self, x, y):
+        """Find a platform at the given position"""
+        for platform in self.game.platforms:
+            if (platform.rect.left <= x <= platform.rect.right and
+                abs(y - platform.rect.top) < 5):
+                return platform
+        return None
+
     def apply_landing_lag(self):
         """Apply landing lag based on vertical velocity and other factors"""
-        # Calculate landing lag based on fall speed (higher fall = more lag)
-        fall_intensity = abs(self.vel.y) / 15.0  # Normalize
-        
-        # Landing lag of 10 frames as requested
-        base_lag_frames = 10
-        
-        # No additional velocity-based lag 
-        velocity_lag = 0
-        
-        # Set landing lag and animation lock
-        self.landing_lag = int(base_lag_frames + velocity_lag)
-        self.animation_locked = True
-        self.animation_lock_timer = 0
-        self.animation_lock_duration = self.landing_lag
-        
-        # Visual feedback - special landing animation
-        self.move = LANDING
-        
-        # Debug output
-        print(f"Landing lag: {self.landing_lag} frames (vel.y: {self.vel.y:.2f})")
+        # This function is kept for compatibility but we use the Melee version instead
+        was_aerial_attack = self.move in [WEAK_ATTACK, HEAVY_ATTACK]
+        self.apply_landing_lag_with_melee_physics(was_aerial_attack)
 
     def update_sprite_image(self):
         """Update the sprite's image based on current movement state"""
@@ -374,13 +606,13 @@ class LocalCharacter(pg.sprite.Sprite):
 
     def can_move(self):
         """Check if character can be controlled by movement inputs"""
-        return not self.animation_locked and self.damage_percent < 999
+        return not self.animation_locked and self.damage_percent < 999 and self.hitstun_frames <= 0
 
     def is_defeated(self):
         """Check if character is defeated (999% damage)"""
         return self.damage_percent >= 999
 
-    def can_drop_through(self, platform):
+    def can_drop_through(self, platform, previous_pos=None):
         """Check if the platform can be dropped through"""
         # Floor platforms cannot be dropped through
         if platform.type == 'floor':
@@ -394,15 +626,42 @@ class LocalCharacter(pg.sprite.Sprite):
         if platform in self.dropping_through_platforms:
             return True
         
-        # If drop-through initiated (down key pressed), allow it
-        if self.drop_through:
-            return True
+        # Only allow drop-through if down key is deliberately pressed
+        # AND we're on top of the platform (not hitting from side/below)
+        if self.drop_through and not self.in_air:
+            # Check if we're actually on top of this platform
+            # More precise check: are we standing on it?
+            platform_top = platform.rect.top + 4  # Adjusted top with offset
+            if (abs(self.pos.y - platform_top) < 5 and  # Within 5 pixels of platform top + offset
+                self.pos.x >= platform.rect.left and 
+                self.pos.x <= platform.rect.right):
+                print(f"{self.name} can drop through platform at y={platform.rect.top}")
+                return True
         
         # If in a drop-through state, allow it to continue
         if self.is_dropping_through:
             return True
         
         # Otherwise, cannot drop through
+        return False
+
+    def is_passing_through_from_below(self, platform, previous_pos):
+        """Check if character is passing through a platform from below"""
+        # Only apply to non-floor platforms
+        if platform.type == 'floor':
+            return False
+            
+        # Never pass through platforms during knockback
+        if hasattr(self, 'is_knockback_air') and self.is_knockback_air:
+            return False
+            
+        # Check if we're moving upward
+        if self.vel.y < 0:
+            # Check if we were below the platform in the previous frame
+            if previous_pos.y > platform.rect.bottom:
+                print(f"{self.name} passing through platform from below")
+                return True
+                
         return False
 
 # Create local character versions of each character
@@ -429,6 +688,8 @@ class LocalMario(LocalCharacter):
             damagedR, damagedL, dead,
             3, 6, 0.5  # weak damage, heavy damage, acceleration
         )
+        # Ensure Mario uses mario physics
+        self.init_melee_physics('mario')
 
 # Luigi - has luM1 through luM8
 class LocalLuigi(LocalCharacter):
@@ -452,6 +713,8 @@ class LocalLuigi(LocalCharacter):
             damagedR, damagedL, dead,
             4, 8, 0.4  # weak damage, heavy damage, acceleration
         )
+        # Ensure Luigi uses luigi physics
+        self.init_melee_physics('luigi')
 
 # Yoshi - has yoM1 through yoM8
 class LocalYoshi(LocalCharacter):
@@ -519,14 +782,14 @@ class LocalNana(LocalCharacter):
             walkR, walkL, standR, standL, 
             weakR, weakL, heavyR, heavyL,
             damagedR, damagedL, dead,
-            5.7, 11, 0.22  # weak damage, heavy damage, acceleration
+            5, 10, 0.3  # weak damage, heavy damage, acceleration
         )
 
-# Link - has liM1 through liM10
+# Link
 class LocalLink(LocalCharacter):
     def __init__(self, game, name, status, health, pos, direc, walk_c, move):
         # Remove standing sprite from walk animation
-        walkR = [liM1, liM2, liM3, liM4, liM5, liM6, liM7, liM8, liM9, liM10]
+        walkR = [liM1, liM2, liM3, liM4, liM5, liM6, liM7, liM8]
         walkL = [pg.transform.flip(image, True, False) for image in walkR]
         standR = liS1
         standL = pg.transform.flip(standR, True, False)
@@ -542,5 +805,5 @@ class LocalLink(LocalCharacter):
             walkR, walkL, standR, standL, 
             weakR, weakL, heavyR, heavyL,
             damagedR, damagedL, dead,
-            6, 12, 0.2  # weak damage, heavy damage, acceleration
+            5, 10, 0.3  # weak damage, heavy damage, acceleration
         ) 
