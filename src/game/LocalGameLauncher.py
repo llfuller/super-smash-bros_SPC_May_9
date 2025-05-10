@@ -28,6 +28,14 @@ if len(sys.argv) > 1:
         # Enable GIANT MODE
         sys.modules['settings'].GIANT_MODE_ENABLED = True
         
+    # Check for TILT MODE flag
+    if '--tilt-mode' in sys.argv:
+        print("🌀 TILT MODE ENABLED! 🌀")
+        # Import settings to set TILT_MODE_ENABLED
+        from settings import *
+        # Enable TILT MODE
+        sys.modules['settings'].TILT_MODE_ENABLED = True
+        
 # Initialize pygame to check for controllers
 pg.init()
 pg.joystick.init()
@@ -36,9 +44,12 @@ print("=== Super Smash Bros - Local Two-Player Edition Launcher ===")
 print()
 
 # Display GIANT MODE status
-from settings import GIANT_MODE_ENABLED
+from settings import GIANT_MODE_ENABLED, TILT_MODE_ENABLED
 if GIANT_MODE_ENABLED:
     print("🔥 GIANT MODE ACTIVE - Characters will be supersized! 🔥")
+    print()
+if TILT_MODE_ENABLED:
+    print("🌀 TILT MODE ACTIVE - The stage will continuously rotate between -20° and +20°! 🌀")
     print()
 
 # Check for controllers
@@ -128,7 +139,11 @@ print("- Realistic knockback formula based on damage percentage")
 print("- Accurate movement speeds and acceleration values")
 print("- Shield blocking to prevent damage (visible as colored bubble)")
 print("- GIANT MODE: Run with '--giant-mode' flag for supersized characters!")
-print("  Example: python LocalGameLauncher.py --giant-mode")
+print("- TILT MODE: Run with '--tilt-mode' flag for rotating stage effects!")
+print("  Example commands:")
+print("  python LocalGameLauncher.py --giant-mode")
+print("  python LocalGameLauncher.py --tilt-mode")
+print("  python LocalGameLauncher.py --giant-mode --tilt-mode")
 print()
 print("Shield Troubleshooting:")
 print("- For Pro Controller: Use L/R buttons (9/10) to activate shield")

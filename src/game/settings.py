@@ -23,6 +23,12 @@ CHARACTER_SCALE = 2.0  # Base character scale (default is 2x)
 GIANT_MODE_ENABLED = False  # Set to True to enable GIANT MODE by default
 GIANT_MODE_SCALE_FACTOR = 1.75  # Makes characters 1.75x larger than normal
 
+# TILT MODE settings
+TILT_MODE_ENABLED = False  # Set to True to enable TILT MODE by default
+TILT_OSCILLATION_SPEED = 0.3  # Speed of stage oscillation in degrees per frame
+TILT_MAX_ANGLE = 20  # Maximum tilt angle in degrees
+TILT_MIN_ANGLE = -20  # Minimum tilt angle in degrees
+
 # game statuses
 INTRO = 0
 GUIDE = 1

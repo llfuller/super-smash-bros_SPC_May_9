@@ -109,6 +109,11 @@ class LocalGame:
         self.tilt_cooldown = 0
         self.tilt_cooldown_duration = 600  # 10 seconds at 60 FPS
         
+        # Add a key for toggling tilt mode (R key)
+        self.tilt_mode_key = pg.K_r
+        self.tilt_mode_cooldown = 0
+        self.tilt_mode_cooldown_duration = 60  # 1 second at 60 FPS
+        
         # Emergency recovery counter for movement issues
         self.emergency_fix_applied = False
         
@@ -412,10 +417,62 @@ class LocalGame:
             
             # Process each event directly (for quit events and debug toggle)
             for event in events:
-                # Handle P key to spawn bob-omb
-                if event.type == pg.KEYDOWN and event.key == pg.K_p and self.initialized and self.playing:
-                    # Only allow spawning bob-ombs during play
-                    self.spawn_bobomb()
+                # check for closing window
+                if event.type == pg.QUIT:                    
+                    print("You quit in the middle of the game!")
+                    self.running = False
+                    pg.quit()
+                    quit()
+                
+                # Handle keyboard events
+                if event.type == pg.KEYDOWN:
+                    # general keyboard events
+                    if event.key == pg.K_ESCAPE:
+                        self.running = False
+                        self.playing = False
+                        
+                    # Handle P key to spawn bob-omb
+                    elif event.key == pg.K_p and self.initialized and self.playing:
+                        # Only allow spawning bob-ombs during play
+                        self.spawn_bobomb()
+                        
+                    # game-specific keyboard events when playing
+                    elif self.playing:
+                        if event.key == pg.K_c:
+                            self.chatting = not self.chatting
+                            if self.chatting:
+                                self.chat_text = ''
+                                self.chat_init = True
+                                
+                        # Toggle controller debug mode with F1
+                        elif event.key == pg.K_F1:
+                            self.controller_debug = not self.controller_debug
+                            input_handler.set_debug(self.controller_debug)
+                            print(f"Controller debug mode: {'ON' if self.controller_debug else 'OFF'}")
+                            
+                        # Toggle shield debug mode with F2
+                        elif event.key == pg.K_F2:
+                            self.shield_debug = not self.shield_debug
+                            print(f"Shield debug mode: {'ON' if self.shield_debug else 'OFF'}")
+                            
+                        # Trigger a one-time battlefield tilt with T key
+                        elif event.key == self.tilt_key and self.tilt_cooldown <= 0:
+                            if self.battlefield_tilt.trigger_tilt():
+                                self.tilt_cooldown = self.tilt_cooldown_duration
+                                print("Battlefield tilt triggered!")
+                                
+                        # Toggle continuous tilt mode with R key
+                        elif event.key == self.tilt_mode_key and self.tilt_mode_cooldown <= 0:
+                            tilt_enabled = self.battlefield_tilt.toggle_tilt_mode()
+                            self.tilt_mode_cooldown = self.tilt_mode_cooldown_duration
+                            print(f"Tilt mode: {'ENABLED' if tilt_enabled else 'DISABLED'}")
+                    
+                    # Handle menu inputs if not playing
+                    elif not self.playing:
+                        if event.key == pg.K_RETURN:
+                            self.startGame()
+                        elif event.key == pg.K_BACKSPACE:
+                            self.quitToMainMenu()
                 
                 # Controller debug output for button presses
                 if self.controller_debug:
@@ -425,19 +482,6 @@ class LocalGame:
                         print(f"Controller Button Up: {event.button}")
                     elif event.type == pg.JOYHATMOTION:
                         print(f"Controller Hat Motion: {event.hat} Value: {event.value}")
-                
-                # check for closing window
-                if event.type == pg.QUIT:                    
-                    print("You quit in the middle of the game!")
-                    self.running = False
-                    pg.quit()
-                    quit()
-
-                # Toggle controller debug mode with F1 key
-                if event.type == pg.KEYDOWN and event.key == pg.K_F1:
-                    self.controller_debug = not self.controller_debug
-                    input_handler.set_debug(self.controller_debug)
-                    print(f"Controller debug mode: {'ON' if self.controller_debug else 'OFF'}")
 
             # Check for attack inputs from all players
             for controller in self.controllers.values():
@@ -465,17 +509,11 @@ class LocalGame:
                             self.running = False
                             pg.quit()
                             quit()
-
-            # Handle movement for all players using their respective controllers
-            # This has been moved to the update method for better timing of intents
-            # for controller in self.controllers.values():
-            #     controller.handle_movement(None, self)
                 
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error in events: {e}")
             import traceback
             traceback.print_exc()  # Print full stack trace for better debugging
-            quit()
 
     def update(self):
         try:
@@ -501,6 +539,10 @@ class LocalGame:
             if hasattr(self, 'tilt_cooldown') and self.tilt_cooldown > 0:
                 self.tilt_cooldown -= 1
             
+            # Update tilt mode cooldown
+            if hasattr(self, 'tilt_mode_cooldown') and self.tilt_mode_cooldown > 0:
+                self.tilt_mode_cooldown -= 1
+            
             # IMPORTANT: Process player controller input BEFORE sprite updates
             # This ensures that jump intents and other inputs are processed first
             for controller in self.controllers.values():
@@ -525,11 +567,27 @@ class LocalGame:
                     # Ensure player doesn't fall off the bottom of the screen
                     if float(player_data['yPos']) > 700:
                         print(f"Player {name} fell off bottom, respawning...")
-                        # Respawn at top center with no velocity
+                        # Respawn at top center with COMPLETELY ZERO MOMENTUM
                         sprite.pos.x = GAME_WIDTH / 2
                         sprite.pos.y = 100
-                        sprite.vel.x = 0
-                        sprite.vel.y = 0
+                        
+                        # Reset ALL momentum and physics state
+                        sprite.vel = pg.math.Vector2(0, 0)  # Zero velocity
+                        sprite.acc = pg.math.Vector2(0, 0)  # Zero acceleration
+                        
+                        # Reset any auxiliary motion state
+                        if hasattr(sprite, 'momentum'):
+                            sprite.momentum = 0
+                        if hasattr(sprite, 'knockback_velocity'):
+                            sprite.knockback_velocity = pg.math.Vector2(0, 0)
+                        
+                        # Reset jump state
+                        sprite.is_jumping = False
+                        sprite.is_fast_falling = False
+                        if hasattr(sprite, 'jump_count'):
+                            sprite.jump_count = 0
+                        if hasattr(sprite, 'jump_pressed'):
+                            sprite.jump_pressed = False
                         
                         # Reset damage percentage to 0% on respawn
                         sprite.damage_percent = 0.0
@@ -552,11 +610,16 @@ class LocalGame:
                         sprite.tumble_state = False
                         if hasattr(sprite, 'is_knockback_air'):
                             sprite.is_knockback_air = False
+                        if hasattr(sprite, 'stunned'):
+                            sprite.stunned = False
                         
                         # Reset animation states
                         sprite.animation_locked = False
                         sprite.move = STAND
                         player_data['move'] = STAND
+                        
+                        # Record respawn event
+                        self.record_event("RESPAWN", f"{name} respawned after falling off the stage!", "Medium")
                     
                     # Check if we need to initialize the character on a platform
                     # This helps prevent the initial falling through platforms issue
@@ -599,9 +662,18 @@ class LocalGame:
             # check method below
             self.drawStatsBoard()
             
+            # Draw platforms with proper rotation support
+            for platform in self.platforms:
+                # Update platform to apply any rotation changes
+                platform.update()
+                
+                # Use platform's draw method (it will handle rotated or original image internally)
+                platform.draw(self.screen)
+            
             # First draw non-player sprites using the sprite group
             non_player_sprites = [sprite for sprite in self.all_sprites 
-                                if not any(sprite == player_data.get('sprite') for player_data in self.players.values() if 'sprite' in player_data)]
+                                if not any(sprite == player_data.get('sprite') for player_data in self.players.values() if 'sprite' in player_data)
+                                and sprite not in self.platforms]  # Exclude platforms since we already drew them
             
             # Create a temporary group for non-player sprites and draw them
             temp_group = pg.sprite.Group()
@@ -751,6 +823,23 @@ class LocalGame:
 
             # Draw recent events
             self.drawRecentEvents()
+
+            # Draw tilt mode status
+            tilt_font = pg.font.SysFont('Arial', 20)
+            if self.battlefield_tilt.tilt_mode_active:
+                tilt_text = tilt_font.render("TILT MODE ACTIVE: Press R to disable", True, (255, 0, 0))
+                self.screen.blit(tilt_text, (GAME_WIDTH + 10, 10))
+                # Show current angle
+                angle_text = tilt_font.render(f"Current angle: {self.battlefield_tilt.tilt_angle:.1f}°", True, (255, 0, 0))
+                self.screen.blit(angle_text, (GAME_WIDTH + 10, 30))
+            elif self.tilt_cooldown > 0:
+                tilt_text = tilt_font.render(f"Tilt cooldown: {self.tilt_cooldown//60}s", True, WHITE)
+                self.screen.blit(tilt_text, (GAME_WIDTH + 10, 10))
+            else:
+                tilt_text = tilt_font.render("Press T for temporary tilt", True, WHITE)
+                self.screen.blit(tilt_text, (GAME_WIDTH + 10, 10))
+                tilt_text = tilt_font.render("Press R for continuous tilt mode", True, WHITE)
+                self.screen.blit(tilt_text, (GAME_WIDTH + 10, 30))
 
             pg.display.flip()
             
@@ -963,6 +1052,13 @@ class LocalGame:
         # Set up controllers with character sprites AFTER sprites are created
         self._setup_controllers()
         
+        # Check if tilt mode should be activated by default
+        from settings import TILT_MODE_ENABLED
+        if TILT_MODE_ENABLED and hasattr(self, 'battlefield_tilt'):
+            self.battlefield_tilt.toggle_tilt_mode()
+            print("🌀 TILT MODE activated on game start! 🌀")
+            self.chat_messages.append('🌀 TILT MODE ACTIVE - stage will continuously rotate! 🌀')
+        
         # Set game state
         self.status = GAME
         self.playing = True
@@ -1018,12 +1114,34 @@ class LocalGame:
                     # Create the player with the appropriate parameters
                     player = character_class(self, name, 'alive', damage_percent, pos, d, w, m)
                     
-                    # Initialize specific physics properties to ensure proper starting state
+                    # Initialize specific physics properties to ensure proper starting state with ZERO MOMENTUM
                     player.vel = pg.math.Vector2(0, 0)  # Start with no velocity
                     player.acc = pg.math.Vector2(0, 0)  # Start with no acceleration
                     player.in_air = False   # Start on the ground
                     player.is_jumping = False
                     player.is_fast_falling = False
+                    
+                    # Reset any auxiliary motion state
+                    if hasattr(player, 'momentum'):
+                        player.momentum = 0
+                    if hasattr(player, 'knockback_velocity'):
+                        player.knockback_velocity = pg.math.Vector2(0, 0)
+                    
+                    # Reset jump state
+                    if hasattr(player, 'jump_count'):
+                        player.jump_count = 0
+                    if hasattr(player, 'jump_pressed'):
+                        player.jump_pressed = False
+                    
+                    # Reset combat states
+                    if hasattr(player, 'hitstun_frames'):
+                        player.hitstun_frames = 0
+                    if hasattr(player, 'tumble_state'):
+                        player.tumble_state = False
+                    if hasattr(player, 'is_knockback_air'):
+                        player.is_knockback_air = False
+                    if hasattr(player, 'stunned'):
+                        player.stunned = False
                     
                     # Adjust positioning - make sure feet are exactly on the platform
                     # Look for platforms at the character's position
@@ -1278,8 +1396,40 @@ class LocalGame:
         # Double-check that all sprites have 0% damage
         for name, player_data in self.players.items():
             if 'sprite' in player_data:
-                player_data['sprite'].damage_percent = 0.0
-                print(f"Confirmed {name}'s damage reset to 0%")
+                sprite = player_data['sprite']
+                
+                # Reset damage
+                sprite.damage_percent = 0.0
+                
+                # Reset ALL momentum and physics state
+                sprite.vel = pg.math.Vector2(0, 0)  # Zero velocity
+                sprite.acc = pg.math.Vector2(0, 0)  # Zero acceleration
+                
+                # Reset any auxiliary motion state
+                if hasattr(sprite, 'momentum'):
+                    sprite.momentum = 0
+                if hasattr(sprite, 'knockback_velocity'):
+                    sprite.knockback_velocity = pg.math.Vector2(0, 0)
+                
+                # Reset jump state
+                sprite.is_jumping = False
+                sprite.is_fast_falling = False
+                if hasattr(sprite, 'jump_count'):
+                    sprite.jump_count = 0
+                if hasattr(sprite, 'jump_pressed'):
+                    sprite.jump_pressed = False
+                
+                # Reset combat states
+                if hasattr(sprite, 'hitstun_frames'):
+                    sprite.hitstun_frames = 0
+                if hasattr(sprite, 'tumble_state'):
+                    sprite.tumble_state = False
+                if hasattr(sprite, 'is_knockback_air'):
+                    sprite.is_knockback_air = False
+                if hasattr(sprite, 'stunned'):
+                    sprite.stunned = False
+                
+                print(f"Confirmed {name}'s damage reset to 0% and momentum reset to 0")
         
         # Reset game state
         self.showed_end = False
