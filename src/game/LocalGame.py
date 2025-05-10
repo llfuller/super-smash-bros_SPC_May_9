@@ -962,6 +962,8 @@ class LocalGame:
                 LINK: LocalLink
             }
             
+            print(f"Creating characters with GIANT_MODE = {GIANT_MODE_ENABLED}")
+            
             for name, player_data in self.players.items():
                 char = player_data['character']
                 x = float(player_data['xPos'])
@@ -1010,13 +1012,28 @@ class LocalGame:
                         # Position character precisely on platform
                         player.pos.y = platform_at_pos.rect.top + 4  # Adjusted to +4 to visually stand on platform
                         player.last_ground_y = player.pos.y
+                        # Ensure the character's rect is updated with the new position
+                        player.rect.midbottom = player.pos
                         print(f"Adjusted {name} to platform at y={player.pos.y}")
                     else:
                         # Default ground position
                         player.last_ground_y = pos[1]
+                        # Ensure the character's rect is updated with the new position
+                        player.rect.midbottom = player.pos
+                    
+                    # Always force visibility even in GIANT mode
+                    if GIANT_MODE_ENABLED:
+                        # Force position update for giant mode
+                        print(f"Force-updating {name} position for GIANT MODE")
+                        player.rect.midbottom = player.pos
+                        # Make sure the platform position is applied
+                        if platform_at_pos:
+                            player.pos.y = platform_at_pos.rect.top + 4
+                            player.rect.midbottom = player.pos
                     
                     # Debug output
                     print(f"Created {char} for {name} at position {pos[0]}, {player.pos.y}")
+                    print(f"Character rect: {player.rect}, midbottom: {player.rect.midbottom}")
                     
                     if char not in character_classes:
                         print(f"Character {char} not found, defaulting to Mario")

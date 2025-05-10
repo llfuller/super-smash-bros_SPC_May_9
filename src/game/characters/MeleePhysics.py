@@ -36,9 +36,11 @@ class MeleePhysicsMixin:
         base_width = MARIO_WIDTH if self.character_type == 'mario' else MARIO_WIDTH
         
         # Apply GIANT MODE scaling to dimensions if enabled
-        if hasattr(settings, 'GIANT_MODE_ENABLED') and settings.GIANT_MODE_ENABLED:
-            self.height_units = base_height * settings.GIANT_MODE_SCALE_FACTOR
-            self.width_units = base_width * settings.GIANT_MODE_SCALE_FACTOR
+        # Use sys.modules to safely access settings module
+        if getattr(sys.modules['settings'], 'GIANT_MODE_ENABLED', False):
+            giant_scale = getattr(sys.modules['settings'], 'GIANT_MODE_SCALE_FACTOR', 1.75)
+            self.height_units = base_height * giant_scale
+            self.width_units = base_width * giant_scale
         else:
             self.height_units = base_height
             self.width_units = base_width
@@ -59,7 +61,7 @@ class MeleePhysicsMixin:
         self.weight = KNOCKBACK['weight'].get(self.character_type, KNOCKBACK['weight']['generic'])
         
         # Adjust physics values for GIANT MODE if enabled
-        if hasattr(settings, 'GIANT_MODE_ENABLED') and settings.GIANT_MODE_ENABLED:
+        if getattr(sys.modules['settings'], 'GIANT_MODE_ENABLED', False):
             # Giant characters are typically slower but have more powerful attacks
             self.weight *= 1.5  # Make giant characters heavier (more resistant to knockback)
             
@@ -76,8 +78,9 @@ class MeleePhysicsMixin:
         print(f"  Air Speed: {self.air_physics['air_speed']}")
         print(f"  Gravity: {self.air_physics['gravity']}")
         print(f"  Weight: {self.weight}")
-        if hasattr(settings, 'GIANT_MODE_ENABLED') and settings.GIANT_MODE_ENABLED:
-            print(f"  GIANT MODE ENABLED - Size multiplier: {settings.GIANT_MODE_SCALE_FACTOR}")
+        if getattr(sys.modules['settings'], 'GIANT_MODE_ENABLED', False):
+            giant_scale = getattr(sys.modules['settings'], 'GIANT_MODE_SCALE_FACTOR', 1.75)
+            print(f"  GIANT MODE ENABLED - Size multiplier: {giant_scale}")
     
     def update_melee_physics(self):
         """Update physics state based on Melee rules"""
