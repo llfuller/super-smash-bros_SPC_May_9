@@ -385,6 +385,30 @@ class InputHandler:
                     if self.debug and self.debug_frame_counter % 30 == 0:
                         print(f"{player_name} button {button} -> {intent}")
             
+            # Check for X and Y buttons to work as jump
+            if state['buttons'] and len(state['buttons']) > 3:  # Make sure we have enough buttons
+                # Get button indices from PRO_CONTROLLER configuration
+                y_button = PRO_CONTROLLER['y_button']
+                x_button = PRO_CONTROLLER['x_button']
+                a_button = PRO_CONTROLLER['a_button']
+                
+                # Check if the buttons are pressed
+                if y_button < len(state['buttons']) and state['buttons'][y_button]:  # Y button
+                    intents[INTENTS['MOVE_UP']] = True
+                    if self.debug and self.debug_frame_counter % 30 == 0:
+                        print(f"{player_name} Y button ({y_button}) -> MOVE_UP (jump)")
+                
+                if x_button < len(state['buttons']) and state['buttons'][x_button]:  # X button
+                    intents[INTENTS['MOVE_UP']] = True
+                    if self.debug and self.debug_frame_counter % 30 == 0:
+                        print(f"{player_name} X button ({x_button}) -> MOVE_UP (jump)")
+                
+                # Also add A button as a jump button for more controller compatibility
+                if a_button < len(state['buttons']) and state['buttons'][a_button]:  # A button
+                    intents[INTENTS['MOVE_UP']] = True
+                    if self.debug and self.debug_frame_counter % 30 == 0:
+                        print(f"{player_name} A button ({a_button}) -> MOVE_UP (jump)")
+            
             # Get analog stick values
             x_axis = 0.0
             y_axis = 0.0
